@@ -1,12 +1,12 @@
 use core::{alloc::{Allocator, Layout, AllocError}, sync::atomic::{AtomicPtr, Ordering}, ptr::NonNull, iter::FusedIterator};
 use alloc::{alloc::Global};
 
-#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 struct FillQueueNode<T> {
     prev: AtomicPtr<Self>,
     v: T
 }
 
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub struct FillQueue<T, A: Allocator = Global> {
     head: AtomicPtr<FillQueueNode<T>>,
     alloc: A

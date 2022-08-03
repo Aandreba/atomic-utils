@@ -1,7 +1,12 @@
 [package]
-name = "atomic-col"
+name = "atomic-utils"
+description = "Various atomic utils"
 version = "0.1.0"
 edition = "2021"
+repository = "https://github.com/Aandreba/atomic-utils"
+keywords = ["atomic", "parallel", "thread", "async"]
+categories = ["no-std", "asynchronous", "concurrency", "rust-patterns"]
+license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
@@ -20,4 +25,5 @@ num-traits = { version = "0.2.15", default-features = false }
 rand = "0.8.5"
 
 [package.metadata.docs.rs]
+all-features = true
 rustdoc-args = ["--cfg", "docsrs"]

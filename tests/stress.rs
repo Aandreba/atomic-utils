@@ -1,10 +1,12 @@
 use std::{thread::{spawn, available_parallelism, sleep}, time::{Duration}};
-use atomic_col::FillQueue;
+use atomic_utils::FillQueue;
 use rand::random;
 
 #[test]
 fn stress_fill_queue () {
     const RUNS : usize = 10;
+    const STRESS : i32 = 50;
+
     static QUEUE : FillQueue<i32> = FillQueue::new();
 
     for _ in 1..available_parallelism().unwrap().get() {
@@ -13,7 +15,7 @@ fn stress_fill_queue () {
                 let v = random::<i32>();
                 QUEUE.push(v);
 
-                let nanos = i32::abs(v / 20);
+                let nanos = i32::abs(v / (2 * STRESS));
                 sleep(Duration::from_nanos(nanos as u64));
             }
         });
