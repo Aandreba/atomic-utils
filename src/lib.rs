@@ -1,7 +1,7 @@
 #![feature(int_roundings, new_uninit)]
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(feature = "alloc", feature(allocator_api))]
-#![cfg_attr(feature = "const", feature(const_trait_impl, const_fn_trait_bound))]
+#![cfg_attr(feature = "const", feature(const_trait_impl))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 #[cfg(feature = "alloc")]
