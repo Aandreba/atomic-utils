@@ -1,6 +1,10 @@
-#![no_std]
-#![feature(allocator_api)]
+#![feature(int_roundings, new_uninit)]
+#![cfg_attr(not(feature = "std"), no_std)]
+#![cfg_attr(feature = "alloc", feature(allocator_api))]
+#![cfg_attr(feature = "const", feature(const_trait_impl, const_fn_trait_bound))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
+#[cfg(feature = "alloc")]
 pub(crate) extern crate alloc;
 
 macro_rules! flat_mod {
@@ -12,8 +16,40 @@ macro_rules! flat_mod {
     };
 }
 
-flat_mod!(fill_queue);
+#[cfg(feature = "alloc")]
+flat_mod!(fill_queue, bitfield);
+
+flat_mod!(take);
+
+#[path = "trait.rs"]
+pub mod traits;
 
 pub mod prelude {
     pub use crate::fill_queue::*;
+    pub use crate::take::*;
+    pub use crate::traits::Atomic;
+}
+
+cfg_if::cfg_if! {
+    if #[cfg(target_has_atomic = "8")] {
+        pub(crate) type Flag = core::sync::atomic::AtomicU8;
+        const TRUE : u8 = 1;
+        const FALSE : u8 = 0;
+    } else if #[cfg(target_has_atomic = "16")] {
+        pub(crate) type Flag = core::sync::atomic::AtomicU16;
+        const TRUE : u16 = 1;
+        const FALSE : u16 = 0;
+    } else if #[cfg(target_has_atomic = "32")] {
+        pub(crate) type Flag = core::sync::atomic::AtomicU32;
+        const TRUE : u32 = 1;
+        const FALSE : u32 = 0;
+    } else if #[cfg(target_has_atomic = "64")] {
+        pub(crate) type Flag = core::sync::atomic::AtomicU64;
+        const TRUE : u64 = 1;
+        const FALSE : u64 = 0;
+    } else {
+        pub(crate) type Flag = core::sync::atomic::AtomicUsize;
+        const TRUE : usize = 1;
+        const FALSE : usize = 0;
+    }
 }

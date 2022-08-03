@@ -6,10 +6,18 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
 default = ["std"]
-std = ["once_cell/std"]
+std = ["alloc", "crossbeam/std", "bytemuck/extern_crate_std", "num-traits/std"]
+alloc = ["crossbeam/alloc", "bytemuck/extern_crate_alloc"]
+const = []
 
 [dependencies]
-once_cell = { version = "1.13.0", features = ["alloc"], default-features = false }
+cfg-if = "1"
+crossbeam = { version = "0.8.2", default-features = false }
+bytemuck = { version = "1.11.0", default-features = false }
+num-traits = { version = "0.2.15", default-features = false }
 
 [dev-dependencies]
 rand = "0.8.5"
+
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]

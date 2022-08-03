@@ -1,6 +1,7 @@
 use core::{alloc::{Allocator, Layout, AllocError}, sync::atomic::{AtomicPtr, Ordering}, ptr::NonNull, iter::FusedIterator};
 use alloc::{alloc::Global};
 
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 struct FillQueueNode<T> {
     prev: AtomicPtr<Self>,
     v: T
@@ -27,7 +28,6 @@ impl<T> FillQueue<T> {
 
 impl<T, A: Allocator> FillQueue<T, A> {
     /// Creates a new [`FillQueue`] with the given allocator.
-    /// /// Creates a new [`FillQueue`] with the global allocator.
     /// # Example
     /// ```rust
     /// #![feature(allocator_api)]
