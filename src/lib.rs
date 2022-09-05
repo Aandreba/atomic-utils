@@ -16,8 +16,15 @@ macro_rules! flat_mod {
     };
 }
 
-#[cfg(feature = "alloc")]
-flat_mod!(fill_queue, bitfield);
+cfg_if::cfg_if! {
+    if #[cfg(feature = "alloc")] {
+        pub mod fill_queue;
+        pub mod bitfield;
+
+        pub use fill_queue::FillQueue;
+        pub use bitfield::AtomicBitBox;
+    }
+}
 
 flat_mod!(take);
 

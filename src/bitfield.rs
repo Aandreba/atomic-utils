@@ -3,25 +3,12 @@ use alloc::{alloc::Global, boxed::Box};
 use bytemuck::Zeroable;
 use num_traits::{One, Zero, Num, WrappingSub};
 use crate::traits::{AtomicInt};
-
-cfg_if::cfg_if! {
-    if #[cfg(target_has_atomic = "8")] {
-        type Default = core::sync::atomic::AtomicU8;
-    } else if #[cfg(target_has_atomic = "16")] {
-        type Default = core::sync::atomic::AtomicU16;
-    } else if #[cfg(target_has_atomic = "32")] {
-        type Default = core::sync::atomic::AtomicU32;
-    } else if #[cfg(target_has_atomic = "64")] {
-        type Default = core::sync::atomic::AtomicU64;
-    } else {
-        type Default = core::sync::atomic::AtomicUsize;
-    }
-}
+use crate::Flag;
 
 /// Bitfield used with atomic operations
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 #[repr(transparent)]
-pub struct AtomicBitBox<T: AtomicInt = Default, A: Allocator = Global> {
+pub struct AtomicBitBox<T: AtomicInt = Flag, A: Allocator = Global> {
     bits: Box<[T], A>
 }
 
