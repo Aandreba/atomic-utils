@@ -2,8 +2,9 @@
 Simple crate with various miscelaneous atomic-related utils
 
 ## Features
-| Name    | Description                            | Enables | Default |
-| ------- | -------------------------------------- | ------- | ------- |
-| `std`   | Enables libstd functionality           | `alloc` | Yes     |
-| `alloc` | Enables liballoc functionality         |         | No      |
-| `const` | Enables constant trait implementations |         | No      |
+| Name      | Description                            | Enables | Default |
+| --------- | -------------------------------------- | ------- | ------- |
+| `std`     | Enables libstd functionality           | `alloc` | Yes     |
+| `alloc`   | Enables liballoc functionality         |         | No      |
+| `futures` | Enables async/await functionality      |         | No      |
+| `const`   | Enables constant trait implementations |         | No      |
