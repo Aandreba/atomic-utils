@@ -1,8 +1,10 @@
 use core::{alloc::{Allocator, Layout, AllocError}, sync::atomic::{AtomicPtr, Ordering}, ptr::NonNull, iter::FusedIterator};
 use alloc::{alloc::Global};
+use crate::{Flag, FALSE, TRUE};
 
 struct FillQueueNode<T> {
-    prev: AtomicPtr<Self>,
+    init: Flag,
+    prev: *mut Self,
     v: T
 }
 
@@ -121,7 +123,8 @@ impl<T, A: Allocator> FillQueue<T, A> {
     /// ```
     pub fn try_push (&self, v: T) -> Result<(), AllocError> {
         let node = FillQueueNode {
-            prev: AtomicPtr::default(),
+            init: Flag::new(FALSE),
+            prev: core::ptr::null_mut(),
             v
         };
 
@@ -132,7 +135,9 @@ impl<T, A: Allocator> FillQueue<T, A> {
 
         let prev = self.head.swap(ptr.as_ptr(), Ordering::AcqRel);
         unsafe {
-            ptr.as_ref().prev.store(prev, Ordering::Release);
+            let rf = &mut *ptr.as_ptr();
+            rf.prev = prev;
+            rf.init.store(TRUE, Ordering::Release);
         }
 
         Ok(())
@@ -153,7 +158,8 @@ impl<T, A: Allocator> FillQueue<T, A> {
     /// ```
     pub fn try_push_mut (&mut self, v: T) -> Result<(), AllocError> {
         let node = FillQueueNode {
-            prev: AtomicPtr::default(),
+            init: Flag::new(TRUE),
+            prev: core::ptr::null_mut(),
             v
         };
 
@@ -161,7 +167,7 @@ impl<T, A: Allocator> FillQueue<T, A> {
         unsafe {
             ptr.as_ptr().write(node);
             let prev = core::ptr::replace(self.head.get_mut(), ptr.as_ptr());
-            *ptr.as_mut().prev.get_mut() = prev;
+            ptr.as_mut().prev = prev;
             Ok(())
         }
     }
@@ -240,9 +246,11 @@ impl<T, A: Allocator> Iterator for ChopIter<T, A> {
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(ptr) = self.ptr {
             unsafe {
-                let mut node = core::ptr::read(ptr.as_ptr());
+                let node = core::ptr::read(ptr.as_ptr());
                 self.alloc.deallocate(ptr.cast(), Layout::new::<FillQueueNode<T>>());
-                self.ptr = NonNull::new(*node.prev.get_mut());
+
+                while node.init.load(Ordering::Acquire) == FALSE { core::hint::spin_loop() }
+                self.ptr = NonNull::new(node.prev);
                 return Some(node.v)
             }
         }
@@ -256,9 +264,11 @@ impl<T, A: Allocator> Drop for ChopIter<T, A> {
     fn drop(&mut self) {
         while let Some(ptr) = self.ptr {
             unsafe {
-                let mut node = core::ptr::read(ptr.as_ptr());
+                let node = core::ptr::read(ptr.as_ptr());
                 self.alloc.deallocate(ptr.cast(), Layout::new::<FillQueueNode<T>>());
-                self.ptr = NonNull::new(*node.prev.get_mut());
+                
+                while node.init.load(Ordering::Acquire) == FALSE { core::hint::spin_loop() }
+                self.ptr = NonNull::new(node.prev);
             }
         }
     }
