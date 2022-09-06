@@ -6,12 +6,14 @@ type Lock = std::thread::Thread;
 #[cfg(not(feature = "std"))]
 type Lock = Arc<()>;
 
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 /// A flag type that completes when marked or dropped
 pub struct Flag {
     #[allow(unused)]
     inner: Arc<FlagQueue>
 }
 
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 /// Subscriber of a [`Flag`]
 #[derive(Clone)]
 pub struct Subscribe {
@@ -66,6 +68,7 @@ impl Subscribe {
     }
 }
 
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 /// Creates a new pair of [`Flag`] and [`Subscribe`]
 pub fn flag () -> (Flag, Subscribe) {
     let flag = Arc::new(FlagQueue(FillQueue::new()));
@@ -91,6 +94,7 @@ cfg_if::cfg_if! {
         use core::{future::Future, task::{Waker, Poll}};
         use futures::future::FusedFuture;
 
+        #[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "futures"))))]
         /// Async flag that completes when marked or droped.
         pub struct AsyncFlag {
             inner: Arc<AsyncFlagQueue>
@@ -128,6 +132,7 @@ cfg_if::cfg_if! {
             }
         }
 
+        #[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "futures"))))]
         /// Subscriber of an [`AsyncFlag`]
         #[derive(Clone)]
         pub struct AsyncSubscribe {

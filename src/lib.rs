@@ -20,14 +20,10 @@ cfg_if::cfg_if! {
     if #[cfg(feature = "alloc")] {
         pub mod fill_queue;
         pub mod bitfield;
-        mod flag;
+        pub mod flag;
 
         pub use fill_queue::FillQueue;
         pub use bitfield::AtomicBitBox;
-        pub use flag::{Flag, Subscribe, flag};
-        
-        #[cfg(feature = "futures")]
-        pub use flag::AsyncFlag;
     }
 }
 
