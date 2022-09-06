@@ -1,4 +1,3 @@
-use core::{mem::ManuallyDrop};
 use alloc::sync::{Arc, Weak};
 use crate::{FillQueue};
 
@@ -9,7 +8,8 @@ type Lock = Arc<()>;
 
 /// A flag type that completes when marked or dropped
 pub struct Flag {
-    inner: Weak<FlagQueue>
+    #[allow(unused)]
+    inner: Arc<FlagQueue>
 }
 
 /// Subscriber of a [`Flag`]
@@ -21,21 +21,7 @@ pub struct Subscribe {
 impl Flag {
     /// Mark this flag as completed, consuming it
     #[inline(always)]
-    pub fn mark (self) {
-        let this = ManuallyDrop::new(self);
-        unsafe {
-            Arc::decrement_strong_count(Weak::into_raw(core::ptr::read(&this.inner)));
-        }
-    }
-}
-
-impl Drop for Flag {
-    #[inline(always)]
-    fn drop(&mut self) {
-        unsafe {
-            Arc::decrement_strong_count(Weak::into_raw(self.inner.clone()));
-        }
-    }
+    pub fn mark (self) {}
 }
 
 impl Subscribe {
@@ -70,10 +56,9 @@ impl Subscribe {
 
 /// Creates a new pair of [`Flag`] and [`Subscribe`]
 pub fn flag () -> (Flag, Subscribe) {
-    let _wakers = Arc::new(FlagQueue(FillQueue::new()));
-    let wakers = Arc::downgrade(&_wakers);
-    core::mem::forget(_wakers);
-    (Flag { inner: wakers.clone() }, Subscribe { inner: wakers })
+    let flag = Arc::new(FlagQueue(FillQueue::new()));
+    let sub = Arc::downgrade(&flag);
+    (Flag { inner: flag }, Subscribe { inner: sub })
 }
 
 struct FlagQueue (pub FillQueue<Lock>);
@@ -95,42 +80,25 @@ cfg_if::cfg_if! {
 
         /// Async flag that completes when marked or droped.
         pub struct AsyncFlag {
-            wakers: Weak<AsyncFlagQueue>
+            wakers: Arc<AsyncFlagQueue>
         }
 
         impl AsyncFlag {
             /// Creates a new flag
+            #[inline(always)]
             pub fn new () -> Self {
-                let _wakers = Arc::new(AsyncFlagQueue(FillQueue::new()));
-                let wakers = Arc::downgrade(&_wakers);
-                core::mem::forget(_wakers);
-                
-                Self { wakers }
+                Self { wakers: Arc::new(AsyncFlagQueue(FillQueue::new())) }
             }
 
             /// Marks this flag as complete, consuming it
             #[inline(always)]
-            pub fn mark (self) {
-                let this = ManuallyDrop::new(self);
-                unsafe {
-                    Arc::decrement_strong_count(Weak::into_raw(core::ptr::read(&this.wakers)));
-                }
-            }
+            pub fn mark (self) {}
 
             /// Creates a new subscriber to this flag.
             #[inline(always)]
             pub fn subscribe (&self) -> AsyncSubscribe {
                 AsyncSubscribe {
-                    inner: Some(self.wakers.clone())
-                }
-            }
-        }
-
-        impl Drop for AsyncFlag {
-            #[inline(always)]
-            fn drop(&mut self) {
-                unsafe {
-                    Arc::decrement_strong_count(Weak::into_raw(self.wakers.clone()));
+                    inner: Some(Arc::downgrade(&self.wakers))
                 }
             }
         }

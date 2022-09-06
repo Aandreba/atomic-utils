@@ -1,12 +1,12 @@
 use std::{thread::{spawn, available_parallelism, sleep}, time::{Duration}};
+use utils_atomics::*;
 use rand::random;
-use utils_atomics::{FillQueue};
+
+const RUNS : usize = 10;
+const STRESS : i32 = 50;
 
 #[test]
 fn stress_fill_queue () {
-    const RUNS : usize = 10;
-    const STRESS : i32 = 50;
-
     static QUEUE : FillQueue<i32> = FillQueue::new();
 
     for _ in 1..available_parallelism().unwrap().get() {
@@ -28,9 +28,37 @@ fn stress_fill_queue () {
     }
 }
 
+#[test]
+fn stress_flag () {
+    use std::sync::atomic::AtomicUsize;
+
+    static STARTED : AtomicUsize = AtomicUsize::new(0);
+    static ENDED : AtomicUsize = AtomicUsize::new(0);
+
+    let (flag, sub) = flag();
+    let mut handles = Vec::new();
+
+    for _ in 1..available_parallelism().unwrap().get() {
+        let sub = sub.clone();
+        handles.push(spawn(move || {
+            STARTED.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+            sub.subscribe();
+            ENDED.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        }));
+    }
+
+    //flag.mark();
+    drop(flag);
+    handles.into_iter()
+        .map(std::thread::JoinHandle::join)
+        .for_each(Result::unwrap);
+
+    assert_eq!(STARTED.load(std::sync::atomic::Ordering::Acquire), ENDED.load(std::sync::atomic::Ordering::Acquire));
+}
+
 #[cfg(feature = "futures")]
 #[tokio::test]
-async fn stress_flag () {
+async fn stress_async_flag () {
     use std::sync::atomic::AtomicUsize;
 
     const SIZE : usize = 100_000;
@@ -49,9 +77,7 @@ async fn stress_flag () {
         }));
     }
 
-    tokio::time::sleep(Duration::from_secs(2)).await;
     flag.mark();
     let _ = futures::future::join_all(handles).await;
-
-    println!("{} started, {} ended (expected {SIZE})", STARTED.load(std::sync::atomic::Ordering::Acquire), ENDED.load(std::sync::atomic::Ordering::Acquire));
+    assert_eq!(STARTED.load(std::sync::atomic::Ordering::Acquire), ENDED.load(std::sync::atomic::Ordering::Acquire));
 }

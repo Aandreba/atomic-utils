@@ -18,7 +18,7 @@ impl<T> FillQueue<T> {
     /// Creates a new [`FillQueue`] with the global allocator.
     /// # Example
     /// ```rust
-    /// use atomic_col::prelude::*;
+    /// use utils_atomics::prelude::*;
     /// 
     /// let queue = FillQueue::<i32>::new();
     /// ```
@@ -34,7 +34,7 @@ impl<T, A: Allocator> FillQueue<T, A> {
     /// ```rust
     /// #![feature(allocator_api)]
     /// 
-    /// use atomic_col::prelude::*;
+    /// use utils_atomics::prelude::*;
     /// use std::alloc::Global;
     /// 
     /// let queue = FillQueue::<i32>::new_in(Global);
@@ -52,7 +52,7 @@ impl<T, A: Allocator> FillQueue<T, A> {
     /// ```rust
     /// #![feature(allocator_api)]
     /// 
-    /// use atomic_col::prelude::*;
+    /// use utils_atomics::prelude::*;
     /// use std::alloc::Global;
     /// 
     /// let queue = FillQueue::<i32>::new();
@@ -68,7 +68,7 @@ impl<T, A: Allocator> FillQueue<T, A> {
     /// Whilst this method is not unsafe, it's result should be considered immediately stale.
     /// # Example
     /// ```rust
-    /// use atomic_col::prelude::*;
+    /// use utils_atomics::prelude::*;
     /// 
     /// let queue = FillQueue::<i32>::new();
     /// assert!(queue.is_empty());
@@ -83,7 +83,7 @@ impl<T, A: Allocator> FillQueue<T, A> {
     /// This method panics if `alloc` fails to allocate the memory needed for the node.
     /// # Example
     /// ```rust
-    /// use atomic_col::prelude::*;
+    /// use utils_atomics::prelude::*;
     /// 
     /// let queue = FillQueue::<i32>::new();
     /// queue.push(1);
@@ -99,7 +99,7 @@ impl<T, A: Allocator> FillQueue<T, A> {
     /// This method panics if `alloc` fails to allocate the memory needed for the node.
     /// # Example
     /// ```rust
-    /// use atomic_col::prelude::*;
+    /// use utils_atomics::prelude::*;
     /// 
     /// let mut queue = FillQueue::<i32>::new();
     /// queue.push_mut(1);
@@ -115,7 +115,7 @@ impl<T, A: Allocator> FillQueue<T, A> {
     /// This method returns an error if `alloc` fails to allocate the memory needed for the node.
     /// # Example
     /// ```rust
-    /// use atomic_col::prelude::*;
+    /// use utils_atomics::prelude::*;
     /// 
     /// let queue = FillQueue::<i32>::new();
     /// assert!(queue.try_push(1).is_ok());
@@ -150,7 +150,7 @@ impl<T, A: Allocator> FillQueue<T, A> {
     /// This method returns an error if `alloc` fails to allocate the memory needed for the node.
     /// # Example
     /// ```rust
-    /// use atomic_col::prelude::*;
+    /// use utils_atomics::prelude::*;
     /// 
     /// let mut queue = FillQueue::<i32>::new();
     /// assert!(queue.try_push_mut(1).is_ok());
@@ -178,7 +178,7 @@ impl<T, A: Allocator> FillQueue<T, A> {
     /// The elements that find themselves inside the chopped region of the queue will be accessed through non-atomic operations.
     /// # Example
     /// ```rust
-    /// use atomic_col::prelude::*;
+    /// use utils_atomics::prelude::*;
     /// 
     /// let queue = FillQueue::<i32>::new();
     /// 
@@ -206,7 +206,7 @@ impl<T, A: Allocator> FillQueue<T, A> {
     /// This method is safe because the mutable reference guarantees we are the only thread that can access this queue.
     /// # Example
     /// ```rust
-    /// use atomic_col::prelude::*;
+    /// use utils_atomics::prelude::*;
     /// 
     /// let mut queue = FillQueue::<i32>::new();
     /// 
