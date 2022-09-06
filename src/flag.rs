@@ -19,6 +19,18 @@ pub struct Subscribe {
 }
 
 impl Flag {
+    /// See [`Arc::into_raw`]
+    #[inline(always)]
+    pub unsafe fn into_raw (self) -> *const FillQueue<Lock> {
+        Arc::into_raw(self.inner).cast()
+    }
+
+    /// See [`Arc::from_raw`]
+    #[inline(always)]
+    pub unsafe fn from_raw (ptr: *const FillQueue<Lock>) -> Self {
+        Self { inner: Arc::from_raw(ptr.cast()) }
+    }
+
     /// Mark this flag as completed, consuming it
     #[inline(always)]
     pub fn mark (self) {}
@@ -61,6 +73,7 @@ pub fn flag () -> (Flag, Subscribe) {
     (Flag { inner: flag }, Subscribe { inner: sub })
 }
 
+#[repr(transparent)]
 struct FlagQueue (pub FillQueue<Lock>);
 
 impl Drop for FlagQueue {
@@ -80,14 +93,26 @@ cfg_if::cfg_if! {
 
         /// Async flag that completes when marked or droped.
         pub struct AsyncFlag {
-            wakers: Arc<AsyncFlagQueue>
+            inner: Arc<AsyncFlagQueue>
         }
 
         impl AsyncFlag {
             /// Creates a new flag
             #[inline(always)]
             pub fn new () -> Self {
-                Self { wakers: Arc::new(AsyncFlagQueue(FillQueue::new())) }
+                Self { inner: Arc::new(AsyncFlagQueue(FillQueue::new())) }
+            }
+
+            /// See [`Arc::into_raw`]
+            #[inline(always)]
+            pub unsafe fn into_raw (self) -> *const FillQueue<Waker> {
+                Arc::into_raw(self.inner).cast()
+            }
+
+            /// See [`Arc::from_raw`]
+            #[inline(always)]
+            pub unsafe fn from_raw (ptr: *const FillQueue<Waker>) -> Self {
+                Self { inner: Arc::from_raw(ptr.cast()) }
             }
 
             /// Marks this flag as complete, consuming it
@@ -98,7 +123,7 @@ cfg_if::cfg_if! {
             #[inline(always)]
             pub fn subscribe (&self) -> AsyncSubscribe {
                 AsyncSubscribe {
-                    inner: Some(Arc::downgrade(&self.wakers))
+                    inner: Some(Arc::downgrade(&self.inner))
                 }
             }
         }
@@ -135,6 +160,7 @@ cfg_if::cfg_if! {
             }
         }
 
+        #[repr(transparent)]
         struct AsyncFlagQueue (pub FillQueue<Waker>);
 
         impl Drop for AsyncFlagQueue {
