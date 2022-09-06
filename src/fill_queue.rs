@@ -1,9 +1,9 @@
 use core::{alloc::{Allocator, Layout, AllocError}, sync::atomic::{AtomicPtr, Ordering}, ptr::NonNull, iter::FusedIterator};
 use alloc::{alloc::Global};
-use crate::{Flag, FALSE, TRUE};
+use crate::{InnerFlag, FALSE, TRUE};
 
 struct FillQueueNode<T> {
-    init: Flag,
+    init: InnerFlag,
     prev: *mut Self,
     v: T
 }
@@ -123,7 +123,7 @@ impl<T, A: Allocator> FillQueue<T, A> {
     /// ```
     pub fn try_push (&self, v: T) -> Result<(), AllocError> {
         let node = FillQueueNode {
-            init: Flag::new(FALSE),
+            init: InnerFlag::new(FALSE),
             prev: core::ptr::null_mut(),
             v
         };
@@ -158,7 +158,7 @@ impl<T, A: Allocator> FillQueue<T, A> {
     /// ```
     pub fn try_push_mut (&mut self, v: T) -> Result<(), AllocError> {
         let node = FillQueueNode {
-            init: Flag::new(TRUE),
+            init: InnerFlag::new(TRUE),
             prev: core::ptr::null_mut(),
             v
         };

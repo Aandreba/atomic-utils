@@ -1,6 +1,6 @@
 use std::{thread::{spawn, available_parallelism, sleep}, time::{Duration}};
 use rand::random;
-use utils_atomics::{FillQueue, AsyncFlag};
+use utils_atomics::{FillQueue};
 
 #[test]
 fn stress_fill_queue () {
@@ -37,7 +37,7 @@ async fn stress_flag () {
     static STARTED : AtomicUsize = AtomicUsize::new(0);
     static ENDED : AtomicUsize = AtomicUsize::new(0);
 
-    let flag = AsyncFlag::new();
+    let flag = utils_atomics::AsyncFlag::new();
     let mut handles = Vec::with_capacity(SIZE);
 
     for _ in 0..SIZE {
