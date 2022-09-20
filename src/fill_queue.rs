@@ -1,6 +1,7 @@
 use core::{alloc::{Allocator, Layout, AllocError}, sync::atomic::{AtomicPtr, Ordering}, ptr::NonNull, iter::FusedIterator};
 use alloc::{alloc::Global};
 use crate::{InnerFlag, FALSE, TRUE};
+use core::fmt::Debug;
 
 struct FillQueueNode<T> {
     init: InnerFlag,
@@ -271,6 +272,13 @@ impl<T, A: Allocator> Drop for ChopIter<T, A> {
                 self.ptr = NonNull::new(node.prev);
             }
         }
+    }
+}
+
+impl<T, A: Debug + Allocator> Debug for FillQueue<T, A> {
+    #[inline]
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        f.debug_struct("FillQueue").field("alloc", &self.alloc).finish_non_exhaustive()
     }
 }
 

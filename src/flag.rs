@@ -6,8 +6,9 @@ type Lock = std::thread::Thread;
 #[cfg(not(feature = "std"))]
 type Lock = Arc<()>;
 
-#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 /// A flag type that completes when marked or dropped
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
+#[derive(Debug)]
 pub struct Flag {
     #[allow(unused)]
     inner: Arc<FlagQueue>
@@ -15,7 +16,7 @@ pub struct Flag {
 
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 /// Subscriber of a [`Flag`]
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Subscribe {
     inner: Weak<FlagQueue>
 }
@@ -77,6 +78,7 @@ pub fn flag () -> (Flag, Subscribe) {
 }
 
 #[repr(transparent)]
+#[derive(Debug)]
 struct FlagQueue (pub FillQueue<Lock>);
 
 impl Drop for FlagQueue {
@@ -94,8 +96,9 @@ cfg_if::cfg_if! {
         use core::{future::Future, task::{Waker, Poll}};
         use futures::future::FusedFuture;
 
-        #[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "futures"))))]
         /// Async flag that completes when marked or droped.
+        #[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "futures"))))]
+        #[derive(Debug)]
         pub struct AsyncFlag {
             inner: Arc<AsyncFlagQueue>
         }
@@ -134,7 +137,7 @@ cfg_if::cfg_if! {
 
         #[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "futures"))))]
         /// Subscriber of an [`AsyncFlag`]
-        #[derive(Clone)]
+        #[derive(Debug, Clone)]
         pub struct AsyncSubscribe {
             inner: Option<Weak<AsyncFlagQueue>>
         }
@@ -166,6 +169,7 @@ cfg_if::cfg_if! {
         }
 
         #[repr(transparent)]
+        #[derive(Debug)]
         struct AsyncFlagQueue (pub FillQueue<Waker>);
 
         impl Drop for AsyncFlagQueue {
