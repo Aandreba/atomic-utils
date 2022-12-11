@@ -22,6 +22,7 @@ pub unsafe trait Atomic: Send + Sync {
 
 #[cfg_attr(docsrs, doc(cfg(feature = "const")))]
 #[cfg(feature = "const")]
+#[const_trait]
 pub trait AtomicConstNew: Atomic {
     fn new (v: Self::Primitive) -> Self;
 }

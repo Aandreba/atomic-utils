@@ -1,5 +1,5 @@
 use std::{thread::{spawn, available_parallelism, sleep}, time::{Duration}};
-use utils_atomics::*;
+use utils_atomics::{*, flag::flag};
 use rand::random;
 
 const RUNS : usize = 10;

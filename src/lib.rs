@@ -1,6 +1,6 @@
-#![feature(int_roundings, new_uninit)]
+#![cfg_attr(feature = "nightly", feature(int_roundings, new_uninit))]
 #![cfg_attr(not(feature = "std"), no_std)]
-#![cfg_attr(feature = "alloc", feature(allocator_api))]
+#![cfg_attr(feature = "alloc_api", feature(allocator_api))]
 #![cfg_attr(feature = "const", feature(const_trait_impl))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
@@ -17,12 +17,42 @@ macro_rules! flat_mod {
 }
 
 cfg_if::cfg_if! {
+    if #[cfg(feature = "alloc_api")] {
+        pub use core::alloc::AllocError; 
+    } else {
+        /// The `AllocError` error indicates an allocation failure
+        /// that may be due to resource exhaustion or to
+        /// something wrong when combining the given input arguments with this
+        /// allocator.
+        #[derive(Copy, Clone, PartialEq, Eq, Debug)]
+        pub struct AllocError;
+
+        #[cfg(not(bootstrap))]
+        #[cfg(feature = "std")]
+        impl std::error::Error for AllocError {}
+
+        // (we need this for downstream impl of trait Error)
+        impl core::fmt::Display for AllocError {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                f.write_str("memory allocation failed")
+            }
+        }
+    }
+}
+
+cfg_if::cfg_if! {
     if #[cfg(feature = "alloc")] {
+        #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
         pub mod fill_queue;
+        #[cfg(feature = "nightly")]
+        #[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "nightly"))))]
         pub mod bitfield;
+        #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
         pub mod flag;
 
+        #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
         pub use fill_queue::FillQueue;
+        #[docfg::docfg(all(feature = "alloc", feature = "nightly"))]
         pub use bitfield::AtomicBitBox;
     }
 }

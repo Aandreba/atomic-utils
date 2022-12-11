@@ -10,10 +10,12 @@ license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
-default = ["std"]
+default = ["std", "nightly"]
 std = ["alloc", "crossbeam/std", "bytemuck/extern_crate_std", "num-traits/std", "once_cell/std", "futures?/std"]
 alloc = ["crossbeam/alloc", "bytemuck/extern_crate_alloc", "once_cell/alloc", "futures?/alloc"]
+alloc_api = ["nightly", "alloc"]
 futures = ["dep:futures"]
+nightly = []
 const = []
 
 [dependencies]
@@ -23,6 +25,7 @@ bytemuck = { version = "1.11.0", default-features = false }
 num-traits = { version = "0.2.15", default-features = false }
 once_cell = { version = "1.14.0", default-features = false }
 futures = { version = "0.3.24", default-features = false, optional = true }
+docfg = "0.1.0"
 
 [dev-dependencies]
 rand = "0.8.5"
