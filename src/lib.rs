@@ -1,4 +1,5 @@
-#![cfg_attr(feature = "nightly", feature(int_roundings, new_uninit))]
+#![cfg_attr(feature = "nightly", feature(int_roundings))]
+#![cfg_attr(all(feature = "nightly", feature = "alloc"), feature(new_uninit))]
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(feature = "alloc_api", feature(allocator_api))]
 #![cfg_attr(feature = "const", feature(const_trait_impl))]
@@ -63,6 +64,7 @@ flat_mod!(take);
 pub mod traits;
 
 pub mod prelude {
+    #[docfg::docfg(feature = "alloc")]
     pub use crate::fill_queue::*;
     pub use crate::take::*;
     pub use crate::traits::Atomic;

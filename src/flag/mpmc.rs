@@ -1,21 +1,16 @@
 use alloc::sync::{Arc, Weak};
 use crate::{FillQueue};
+use super::{Lock, lock_new};
 
-#[cfg(feature = "std")]
-type Lock = std::thread::Thread;
-#[cfg(not(feature = "std"))]
-type Lock = Arc<()>;
-
-/// A flag type that completes when marked or dropped
+/// A flag type that will be completed when all references to [`Flag`] have been dropped or marked.
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Flag {
-    #[allow(unused)]
-    inner: Arc<FlagQueue>
+    _inner: Arc<FlagQueue>
 }
 
-#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 /// Subscriber of a [`Flag`]
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 #[derive(Debug, Clone)]
 pub struct Subscribe {
     inner: Weak<FlagQueue>
@@ -25,13 +20,13 @@ impl Flag {
     /// See [`Arc::into_raw`]
     #[inline(always)]
     pub unsafe fn into_raw (self) -> *const FillQueue<Lock> {
-        Arc::into_raw(self.inner).cast()
+        Arc::into_raw(self._inner).cast()
     }
 
     /// See [`Arc::from_raw`]
     #[inline(always)]
     pub unsafe fn from_raw (ptr: *const FillQueue<Lock>) -> Self {
-        Self { inner: Arc::from_raw(ptr.cast()) }
+        Self { _inner: Arc::from_raw(ptr.cast()) }
     }
 
     /// Mark this flag as completed, consuming it
@@ -41,26 +36,32 @@ impl Flag {
 
 impl Subscribe {
     // Blocks the current thread until the flag gets marked.
-    #[inline(always)]
+    #[deprecated(since = "0.4.0", note = "use `wait` instead")]
+    #[inline]
     pub fn subscribe (&self) {
-        #[cfg(feature = "std")] {
-            if let Some(queue) = self.inner.upgrade() {
-                queue.0.push(std::thread::current());
+        self.wait()
+    }
+
+    // Blocks the current thread until the flag gets marked.
+    #[inline]
+    pub fn wait (&self) {
+        if let Some(queue) = self.inner.upgrade() {
+            #[allow(unused_mut)]
+            let mut waker = lock_new();
+
+            #[cfg(feature = "std")] {
+                queue.0.push(waker);
                 drop(queue);
                 std::thread::park();
             }
-        }
-
-        #[cfg(not(feature = "std"))] {
-            if let Some(queue) = self.inner.upgrade() {
-                let mut lock = Arc::new(());
-                queue.0.push(lock.queue());
+    
+            #[cfg(not(feature = "std"))] {
+                queue.0.push(waker.clone());
                 drop(queue);
-                
                 loop {
-                    match Arc::try_unwrap(lock) {
+                    match Arc::try_unwrap(waker) {
                         Ok(_) => break,
-                        Err(e) => lock = e
+                        Err(e) => waker = e
                     }
                     // core::hint::spin_loop();
                 }
@@ -69,12 +70,14 @@ impl Subscribe {
     }
 }
 
+/// Creates a new pair of [`Flag`] and [`Subscribe`].
+/// 
+/// The flag will be completed when all references to [`Flag`] have been dropped or marked.
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
-/// Creates a new pair of [`Flag`] and [`Subscribe`]
 pub fn flag () -> (Flag, Subscribe) {
     let flag = Arc::new(FlagQueue(FillQueue::new()));
     let sub = Arc::downgrade(&flag);
-    (Flag { inner: flag }, Subscribe { inner: sub })
+    (Flag { _inner: flag }, Subscribe { inner: sub })
 }
 
 #[repr(transparent)]
@@ -84,10 +87,7 @@ struct FlagQueue (pub FillQueue<Lock>);
 impl Drop for FlagQueue {
     #[inline(always)]
     fn drop(&mut self) {
-        #[cfg(feature = "std")]
-        self.0.chop_mut().for_each(|x| x.unpark());
-        #[cfg(not(feature = "std"))]
-        self.0.chop_mut().for_each(|x| x.store(crate::TRUE, core::sync::atomic::Ordering::Release));
+        self.0.chop_mut().for_each(super::lock_wake);
     }
 }
 
@@ -96,15 +96,26 @@ cfg_if::cfg_if! {
         use core::{future::Future, task::{Waker, Poll}};
         use futures::future::FusedFuture;
 
-        /// Async flag that completes when marked or droped.
+        /// Creates a new pair of [`AsyncFlag`] and [`AsyncSubscribe`]
         #[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "futures"))))]
-        #[derive(Debug)]
+        #[inline]
+        pub fn async_flag () -> (AsyncFlag, AsyncSubscribe) {
+            #[allow(deprecated)]
+            let flag = AsyncFlag::new();
+            let sub = flag.subscribe();
+            return (flag, sub)
+        }
+
+        /// Async flag that will be completed when all references to [`Flag`] have been dropped or marked.
+        #[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "futures"))))]
+        #[derive(Debug, Clone)]
         pub struct AsyncFlag {
             inner: Arc<AsyncFlagQueue>
         }
 
         impl AsyncFlag {
             /// Creates a new flag
+            #[deprecated(since = "0.4.0", note = "use `async_flag` instead")]
             #[inline(always)]
             pub fn new () -> Self {
                 Self { inner: Arc::new(AsyncFlagQueue(FillQueue::new())) }

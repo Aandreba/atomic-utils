@@ -431,7 +431,7 @@ impl<T, A: Debug + Allocator> Debug for FillQueue<T, A> {
 #[cfg(not(feature = "alloc_api"))]
 impl<T> Debug for FillQueue<T> {
     #[inline]
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
         f.debug_struct("FillQueue").finish_non_exhaustive()
     }
 }

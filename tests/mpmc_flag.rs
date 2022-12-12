@@ -1,33 +1,7 @@
-use std::{thread::{spawn, available_parallelism, sleep}, time::{Duration}};
-use utils_atomics::{*, flag::flag};
-use rand::random;
+use std::thread::{available_parallelism, spawn};
+use utils_atomics::*;
 
-const RUNS : usize = 10;
-const STRESS : i32 = 50;
-
-#[test]
-fn stress_fill_queue () {
-    static QUEUE : FillQueue<i32> = FillQueue::new();
-
-    for _ in 1..available_parallelism().unwrap().get() {
-        spawn(move || {
-            loop {
-                let v = random::<i32>();
-                QUEUE.push(v);
-
-                let nanos = i32::abs(v / (2 * STRESS));
-                sleep(Duration::from_nanos(nanos as u64));
-            }
-        });
-    }
-
-    for _ in 0..RUNS {
-        sleep(Duration::from_secs(1));
-        let count = QUEUE.chop().count();
-        println!("Chopped elements: {count}!")
-    }
-}
-
+#[cfg(feature = "alloc")]
 #[test]
 fn stress_flag () {
     use std::sync::atomic::AtomicUsize;
@@ -35,14 +9,14 @@ fn stress_flag () {
     static STARTED : AtomicUsize = AtomicUsize::new(0);
     static ENDED : AtomicUsize = AtomicUsize::new(0);
 
-    let (flag, sub) = flag();
+    let (flag, sub) = flag::mpmc::flag();
     let mut handles = Vec::new();
 
     for _ in 1..available_parallelism().unwrap().get() {
         let sub = sub.clone();
         handles.push(spawn(move || {
             STARTED.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
-            sub.subscribe();
+            sub.wait();
             ENDED.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         }));
     }
@@ -65,7 +39,7 @@ async fn stress_async_flag () {
     static STARTED : AtomicUsize = AtomicUsize::new(0);
     static ENDED : AtomicUsize = AtomicUsize::new(0);
 
-    let flag = utils_atomics::AsyncFlag::new();
+    let (flag, _) = utils_atomics::flag::mpmc::async_flag();
     let mut handles = Vec::with_capacity(SIZE);
 
     for _ in 0..SIZE {
