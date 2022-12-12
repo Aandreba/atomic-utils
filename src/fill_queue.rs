@@ -1,9 +1,13 @@
-use core::{sync::atomic::{AtomicPtr, Ordering}, ptr::NonNull, iter::FusedIterator, alloc::Layout};
-
+use core::{sync::atomic::{AtomicPtr, Ordering, AtomicUsize, AtomicIsize}, ptr::NonNull, iter::FusedIterator, alloc::Layout, mem::MaybeUninit, num::NonZeroUsize};
 use crate::{InnerFlag, FALSE, TRUE, AllocError};
 use core::fmt::Debug;
 #[cfg(feature = "alloc_api")]
 use {alloc::{alloc::Global}, core::alloc::*};
+
+// SAFETY: eight is not zero
+const DEFAULT_BLOCK_SIZE: NonZeroUsize = unsafe {
+    NonZeroUsize::new_unchecked(8)
+};
 
 macro_rules! impl_all {
     (impl $(@$tr:path =>)? $target:ident {
@@ -15,7 +19,7 @@ macro_rules! impl_all {
                     $($t)*
                 }
             } else {
-                impl<T> $($tr for)? $target <T> {
+                impl<T> $($tr for)? $target<T> {
                     $($t)*
                 }
             }
@@ -23,15 +27,20 @@ macro_rules! impl_all {
     };
 }
 
-struct FillQueueNode<T> {
+struct NodeValue<T> {
     init: InnerFlag,
-    prev: *mut Self,
-    v: T
+    v: MaybeUninit<T>,
+    // only first elements of a block have a parent set, and that parent may be null
+    prev: *mut NodeValue<T>
 }
 
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub struct FillQueue<T, #[cfg(feature = "alloc_api")] A: Allocator = Global> {
-    head: AtomicPtr<FillQueueNode<T>>,
+    // Current block's firts value slot
+    head_block: AtomicPtr<NodeValue<T>>,
+    // Current block's head position
+    idx: AtomicIsize,
+    block_size: usize,
     #[cfg(feature = "alloc_api")]
     alloc: A
 }
@@ -44,10 +53,20 @@ impl<T> FillQueue<T> {
     /// 
     /// let queue = FillQueue::<i32>::new();
     /// ```
-    #[inline(always)]
+    #[inline]
     pub const fn new () -> Self {
+        Self::new_with_block_size(DEFAULT_BLOCK_SIZE)
+    }
+
+    #[inline]
+    pub const fn new_with_block_size (block_size: NonZeroUsize) -> Self {
+        const SIZE_LIMIT: usize = isize::MAX as usize;
+        if block_size.get() >= SIZE_LIMIT { panic!("attempted to create a queue too big") }
+
         Self {
-            head: AtomicPtr::new(core::ptr::null_mut()),
+            head_block: AtomicPtr::new(core::ptr::null_mut()),
+            idx: AtomicIsize::new((block_size.get() - 1) as isize),
+            block_size: block_size.get(),
             #[cfg(feature = "alloc_api")]
             alloc: Global
         }
@@ -66,10 +85,18 @@ impl<T, A: Allocator> FillQueue<T, A> {
     /// 
     /// let queue = FillQueue::<i32>::new_in(Global);
     /// ```
-    #[inline(always)]
+    #[inline]
     pub const fn new_in (alloc: A) -> Self {
+        Self::new_with_block_size_in(DEFAULT_BLOCK_SIZE)
+    }
+
+    #[inline(always)]
+    pub const fn new_with_block_size_in (block_size: NonZeroUsize, alloc: A) -> Self {
+        let block_limit = block_size.get() - 1;
         Self {
-            head: AtomicPtr::new(core::ptr::null_mut()),
+            head_block: AtomicPtr::new(core::ptr::null_mut()),
+            idx: AtomicUsize::new(block_limit),
+            block_limit,
             alloc
         }
     }
@@ -93,6 +120,11 @@ impl<T, A: Allocator> FillQueue<T, A> {
 
 impl_all! {
     impl FillQueue {
+        #[inline]
+        pub fn block_size (&self) -> usize {
+            return self.block_size
+        }
+
         /// Returns `true` if the que is currently empty, `false` otherwise.
         /// # Safety
         /// Whilst this method is not unsafe, it's result should be considered immediately stale.
@@ -105,7 +137,7 @@ impl_all! {
         /// ```
         #[inline(always)]
         pub fn is_empty (&self) -> bool {
-            self.head.load(Ordering::Relaxed).is_null()
+            self.head_block.load(Ordering::Relaxed).is_null()
         }
 
         /// Uses atomic operations to push an element to the queue.
@@ -155,6 +187,74 @@ impl_all! {
         /// assert_eq!(queue.chop().next(), Some(1));
         /// ```
         pub fn try_push (&self, v: T) -> Result<(), AllocError> {
+            const ADD_MASK: isize = isize::MIN.add_wraping(1);
+
+            // todo add with the mask, so when we add it is with locking possible chops
+
+            let (idx, ptr) = loop {
+                // Get index for our value 
+                let mut idx = self.idx.fetch_add(1, Ordering::AcqRel);
+
+                // New block is being created, wait for it to be done
+                if idx.is_negative() {
+                    // Avoid quick succesive additions to idx by checking in an inner loop the status of idx,
+                    // thus avoiding danger to overflow back to positives
+                    loop {
+                        if !self.idx.load(Ordering::Relaxed).is_negative() { break }
+                        #[cfg(feature = "std")]
+                        std::thread::yield_now();
+                    }
+                }
+
+                // There is no more space in the block
+                if idx >= self.block_size as isize {
+                    match self.idx.compare_exchange(idx, isize::MIN, Ordering::AcqRel, Ordering::Acquire) {
+                        // We get to create the new block
+                        Ok(_) => {
+                            // Allocate the equivalent of `Vec::with_capacity(block_size)`
+                            let layout = Layout::array::<NodeValue<T>>(self.block_size).map_err(|_| AllocError)?;
+                            #[cfg(feature = "alloc_api")]
+                            let alloc: Result<NonNull<NodeValue<T>>, AllocError> = self.alloc.allocate(layout).map(NonNull::cast::<NodeValue<T>>);
+                            #[cfg(not(feature = "alloc_api"))]
+                            let alloc: Result<NonNull<NodeValue<T>>, AllocError> = NonNull::new(unsafe { alloc::alloc::alloc(layout).cast::<NodeValue<T>>() }).ok_or(AllocError);
+
+                            let block = match alloc {
+                                Ok(x) => unsafe {
+                                    // Set the new head of the list
+                                    let prev = self.head.swap(x.as_mut_ptr(), Ordering::AcqRel);
+                                    // Initialize node
+                                    x.as_mut_ptr().write(NodeValue {
+                                        init: InnerFlag::new(FALSE),
+                                        v: MaybeUninit::uninit(),
+                                        prev
+                                    });
+
+                                    // Next value must be at index 1 of the block, since 0 is the one we'll use
+                                    self.idx.store(1, Ordering::Release);
+                                    break (0, x.as_mut_ptr())
+                                },
+                                
+                                Err(e) => {
+                                    // Give someone else the chance to allocate the new block
+                                    self.idx.store(self.block_size, Ordering::Release);
+                                    return Err(e)
+                                }
+                            };
+                        },
+
+                        // Someone else beat us to creating the new block, we'll have to wait for them
+                        Err(_) => continue
+                    }
+                }
+
+                let ptr = self.ptr.load(Ordering::Acquire);
+                break (idx, todo!())
+            };
+
+            // There is no more space in the block
+            let my_node = 0;
+
+            /*
             let node = FillQueueNode {
                 init: InnerFlag::new(FALSE),
                 prev: core::ptr::null_mut(),
@@ -174,12 +274,12 @@ impl_all! {
                 ptr.as_ptr().write(node)
             }
 
-            let prev = self.head.swap(ptr.as_ptr(), Ordering::AcqRel);
+            let prev = self.head_block.swap(ptr.as_ptr(), Ordering::AcqRel);
             unsafe {
                 let rf = &mut *ptr.as_ptr();
                 rf.prev = prev;
                 rf.init.store(TRUE, Ordering::Release);
-            }
+            }*/
 
             Ok(())
         }
@@ -221,7 +321,7 @@ impl_all! {
             
             unsafe {
                 ptr.as_ptr().write(node);
-                let prev = core::ptr::replace(self.head.get_mut(), ptr.as_ptr());
+                let prev = core::ptr::replace(self.head_block.get_mut(), ptr.as_ptr());
                 ptr.as_mut().prev = prev;
                 Ok(())
             }
@@ -312,7 +412,7 @@ impl<T> FillQueue<T> {
     /// ```
     #[inline(always)]
     pub fn chop (&self) -> ChopIter<T> {
-        let ptr = self.head.swap(core::ptr::null_mut(), Ordering::AcqRel);
+        let ptr = self.head_block.swap(core::ptr::null_mut(), Ordering::AcqRel);
         ChopIter { 
             ptr: NonNull::new(ptr),
         }
@@ -340,7 +440,7 @@ impl<T> FillQueue<T> {
     #[inline(always)]
     pub fn chop_mut (&mut self) -> ChopIter<T> {
         let ptr = unsafe {
-            core::ptr::replace(self.head.get_mut(), core::ptr::null_mut())
+            core::ptr::replace(self.head_block.get_mut(), core::ptr::null_mut())
         };
 
         ChopIter { 
