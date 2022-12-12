@@ -28,9 +28,18 @@ futures = { version = "0.3.24", default-features = false, optional = true }
 docfg = "0.1.0"
 
 [dev-dependencies]
+criterion = "0.4.0"
 rand = "0.8.5"
 tokio = { version = "1.21.0", features = ["full"] }
 
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
+
+[[bench]]
+name = "queue_push"
+harness = false
+
+[[bench]]
+name = "queue_chop"
+harness = false
