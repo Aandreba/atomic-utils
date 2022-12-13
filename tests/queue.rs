@@ -37,6 +37,7 @@ fn stress_fill_queue () {
     let rem = queue.chop().count();
     println!("{} v. {}", *pushed.get_mut(), *chopped.get_mut() + rem);
     assert_eq!(*pushed.get_mut(), *chopped.get_mut() + rem);
+    queue.push(1);
 }
 
 #[test]

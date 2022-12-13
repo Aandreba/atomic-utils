@@ -239,9 +239,6 @@ impl_all! {
 
                                     // Initialize block (specifically, set it's parent)
                                     let prev = crate::ptr_from_raw_parts_mut(prev.cast(), if prev.is_null() { 0 } else { self.block_size });
-                                    /* BUG FOUND! INVALID ALIGNMENT of 1, 8 required */
-                                    //let bytes = core::slice::from_raw_parts(ptr.as_ptr().cast::<u8>(), layout.size());
-                                    //println!("field offset: {prev_offset}");
                                     ptr.as_ptr().add(prev_offset).cast::<*mut Block<T>>().write(prev);
 
                                     // Mark node as initialized
@@ -342,13 +339,85 @@ impl_all! {
         /// assert_eq!(queue.chop_mut().next(), Some(1));
         /// ```
         pub fn try_push_mut (&mut self, v: T) -> Result<(), AllocError> {
-            todo!()
+            // Bit structure
+            //  [1]       ...
+            //  ^^^
+            //  Allocating
+
+            let self_block = self.block.get_mut();
+            let self_idx = self.idx.get_mut();
+
+            let (idx, block) = {
+                // Get block for our value
+                let block = *self_block;
+
+                // Get index for our value
+                let idx = *self_idx;
+                *self_idx += 1;
+
+                // Someone is allocating a new block
+                if idx.is_negative()  {
+                    unreachable!()
+                }
+
+                // There is no more space in the block
+                if block.is_null() || idx >= self.block_size as isize {
+                    // Allocate the equivalent of `Vec::with_capacity(block_size)`
+                    let (layout, prev_offset, nodes_offset) = Self::calculate_layout(self.block_size).map_err(|_| AllocError)?;
+                    #[cfg(feature = "alloc_api")]
+                    let alloc: Result<NonNull<u8>, AllocError> = self.alloc.allocate(layout).map(NonNull::cast::<u8>);
+                    #[cfg(not(feature = "alloc_api"))]
+                    let alloc: Result<NonNull<u8>, AllocError> = NonNull::new(unsafe { alloc::alloc::alloc(layout) }).ok_or(AllocError);
+
+                    match alloc {
+                        Ok(ptr) => unsafe {
+                            // Initialize all nodes (by setting them as uninitialized)
+                            let nodes = ptr.as_ptr().add(nodes_offset).cast::<Node<T>>();
+                            for i in 0..self.block_size {
+                                nodes.add(i).cast::<InnerFlag>().write(InnerFlag::new(FALSE));
+                            }
+
+                            // Set the new head block
+                            let prev = core::mem::replace(self_block, ptr.as_ptr());
+
+                            // Initialize block (specifically, set it's parent)
+                            let prev = crate::ptr_from_raw_parts_mut(prev.cast(), if prev.is_null() { 0 } else { self.block_size });
+                            ptr.as_ptr().add(prev_offset).cast::<*mut Block<T>>().write(prev);
+
+                            // Mark node as initialized
+                            ptr.as_ptr().cast::<InnerFlag>().write(InnerFlag::new(TRUE));
+                            
+                            // Next value must be at index 1 of the block, since 0 is the one we'll use
+                            *self_idx = 1;
+                            (0, crate::ptr_from_raw_parts_mut::<Block<T>>(ptr.as_ptr().cast(), self.block_size))
+                        },
+                        
+                        Err(e) => {
+                            // Give someone else the chance to allocate the new block
+                            *self_idx = self.block_size as isize;
+                            return Err(e)
+                        }
+                    }
+                } else {
+                    (idx, crate::ptr_from_raw_parts_mut::<Block<T>>(block.cast(), if block.is_null() { 0 } else { self.block_size }))
+                }
+            };
+
+            // Initialize the appropiate node
+            unsafe {
+                let block = &mut *block;
+                let node = block.nodes.get_unchecked_mut(idx as usize);
+                node.v.get_mut().write(v);
+                *node.init.get_mut() = TRUE;
+            }
+
+            Ok(())
         }
     }
 }
 
 #[cfg(feature = "alloc_api")]
-impl<T, A: Allocator> FillQueue<T, A> {
+impl<T, A: Allocator + Clone> FillQueue<T, A> {
     /// Returns a LIFO (Last In First Out) iterator over a chopped chunk of a [`FillQueue`].
     /// The elements that find themselves inside the chopped region of the queue will be accessed through non-atomic operations.
     /// # Example
@@ -368,8 +437,26 @@ impl<T, A: Allocator> FillQueue<T, A> {
     /// assert_eq!(iter.next(), None)
     /// ```
     #[inline(always)]
-    pub fn chop (&self) -> ChopIter<T, A> where A: Clone {
-        todo!()
+    pub fn chop (&self) -> ChopIter<T, A> {
+        let ptr = self.block.swap(core::ptr::null_mut(), Ordering::SeqCst);
+        let len = if ptr.is_null() { 0 } else { self.block_size };
+        let limit = self.idx.swap(0, Ordering::SeqCst);
+        let range;
+
+        // New block is being allocated, which means this one is full 
+        if limit.is_negative() {
+            range = 0..len
+        } else {
+            range = 0..(limit as usize)
+        }
+
+        ChopIter {
+            ptr: NonNull::new(crate::ptr_from_raw_parts_mut(ptr.cast(), len)),
+            #[cfg(not(feature = "nightly"))]
+            block_size: self.block_size,
+            range,
+            alloc: self.alloc.clone()
+        }
     }
 
     /// Returns a LIFO (Last In First Out) iterator over a chopped chunk of a [`FillQueue`]. The chopping is done with non-atomic operations.
@@ -392,8 +479,29 @@ impl<T, A: Allocator> FillQueue<T, A> {
     /// assert_eq!(iter.next(), None)
     /// ```
     #[inline(always)]
-    pub fn chop_mut (&mut self) -> ChopIter<T, A> where A: Clone {
-        todo!()
+    pub fn chop_mut (&mut self) -> ChopIter<T, A> {
+        let self_block = self.block.get_mut();
+        let self_idx = self.idx.get_mut();
+
+        let ptr = core::mem::replace(self_block, core::ptr::null_mut());
+        let len = if ptr.is_null() { 0 } else { self.block_size };
+        let limit = core::mem::replace(self_idx, 0);
+        let range;
+
+        // New block is being allocated, which means this one is full 
+        if limit.is_negative() {
+            range = 0..len
+        } else {
+            range = 0..(limit as usize)
+        }
+
+        ChopIter {
+            ptr: NonNull::new(crate::ptr_from_raw_parts_mut(ptr.cast(), len)),
+            #[cfg(not(feature = "nightly"))]
+            block_size: self.block_size,
+            range,
+            alloc: self.alloc.clone()
+        }
     }
 }
 
@@ -460,7 +568,27 @@ impl<T> FillQueue<T> {
     /// ```
     #[inline(always)]
     pub fn chop_mut (&mut self) -> ChopIter<T> {
-        todo!()
+        let self_block = self.block.get_mut();
+        let self_idx = self.idx.get_mut();
+
+        let ptr = core::mem::replace(self_block, core::ptr::null_mut());
+        let len = if ptr.is_null() { 0 } else { self.block_size };
+        let limit = core::mem::replace(self_idx, 0);
+        let range;
+
+        // New block is being allocated, which means this one is full 
+        if limit.is_negative() {
+            range = 0..len
+        } else {
+            range = 0..(limit as usize)
+        }
+
+        ChopIter {
+            ptr: NonNull::new(crate::ptr_from_raw_parts_mut(ptr.cast(), len)),
+            #[cfg(not(feature = "nightly"))]
+            block_size: self.block_size,
+            range
+        }
     }
 }
 
@@ -477,8 +605,6 @@ cfg_if::cfg_if! {
         unsafe impl<T: Sync> Sync for ChopIter<T> {}
     }
 }
-
-// todo drop
 
 /// Iterator of [`FillQueue::chop`] and [`FillQueue::chop_mut`]
 pub struct ChopIter<T, #[cfg(feature = "alloc_api")] A: Allocator = Global> {
