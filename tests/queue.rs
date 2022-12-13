@@ -5,6 +5,32 @@ use rand::random;
 
 const RUNS: usize = 20;
 
+/*
+TODO FIX MEMORY LEAK
+
+thread 'stress_fill_queue' panicked at 'assertion failed: `(left == right)`
+  left: `100`,
+ right: `99`', tests/queue.rs:39:5
+stack backtrace:
+   0: rust_begin_unwind
+             at /rustc/bdb07a8ec8e77aa10fb84fae1d4ff71c21180bb4/library/std/src/panicking.rs:575:5
+   1: core::panicking::panic_fmt
+             at /rustc/bdb07a8ec8e77aa10fb84fae1d4ff71c21180bb4/library/core/src/panicking.rs:64:14
+   2: core::panicking::assert_failed_inner
+   3: core::panicking::assert_failed
+             at /rustc/bdb07a8ec8e77aa10fb84fae1d4ff71c21180bb4/library/core/src/panicking.rs:199:5
+   4: queue::stress_fill_queue
+             at ./tests/queue.rs:39:5
+   5: queue::stress_fill_queue::{{closure}}
+             at ./tests/queue.rs:10:25
+   6: core::ops::function::FnOnce::call_once
+             at /rustc/bdb07a8ec8e77aa10fb84fae1d4ff71c21180bb4/library/core/src/ops/function.rs:507:5
+   7: core::ops::function::FnOnce::call_once
+             at /rustc/bdb07a8ec8e77aa10fb84fae1d4ff71c21180bb4/library/core/src/ops/function.rs:507:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+test stress_fill_queue ... FAILED
+*/
+
 #[cfg(feature = "alloc")]
 #[test]
 fn stress_fill_queue () {
