@@ -239,6 +239,9 @@ impl_all! {
 
                                     // Initialize block (specifically, set it's parent)
                                     let prev = crate::ptr_from_raw_parts_mut(prev.cast(), if prev.is_null() { 0 } else { self.block_size });
+                                    /* BUG FOUND! INVALID ALIGNMENT of 1, 8 required */
+                                    //let bytes = core::slice::from_raw_parts(ptr.as_ptr().cast::<u8>(), layout.size());
+                                    //println!("field offset: {prev_offset}");
                                     ptr.as_ptr().add(prev_offset).cast::<*mut Block<T>>().write(prev);
 
                                     // Mark node as initialized
@@ -283,7 +286,7 @@ impl_all! {
                 let padding = parent.padding_needed_for(field.align());
                 #[cfg(not(feature = "nightly"))]
                 let padding = {
-                    let len = self.size();
+                    let len = parent.size();
                     let align = field.align();
 
                     // Rounded up value is:
@@ -310,7 +313,7 @@ impl_all! {
                 };
 
                 let offset = parent.size() + padding;
-                return Ok((Layout::from_size_align(offset + field.size(), parent.align())?, offset))
+                return Ok((Layout::from_size_align(offset + field.size(), usize::max(parent.align(), field.align()))?, offset))
             }
 
             let result = Layout::new::<InnerFlag>();

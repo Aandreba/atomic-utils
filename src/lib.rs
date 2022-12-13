@@ -99,11 +99,13 @@ pub(crate) use core::ptr::from_raw_parts_mut as ptr_from_raw_parts_mut;
 
 #[cfg(not(feature = "nightly"))]
 #[inline]
-pub const fn ptr_from_raw_parts_mut<T: ?Sized + Pointee<Metadata = usize>>(
+#[track_caller]
+pub(crate) unsafe fn ptr_from_raw_parts_mut<T: ?Sized> (
     data_address: *mut (),
-    metadata: <T as Pointee>::Metadata,
+    metadata: usize,
 ) -> *mut T {
     unsafe {
-        return core::mem::transmute(core::slice::from_raw_parts_mut(data_address, metadata));
+        let slice: *mut [()] = core::ptr::slice_from_raw_parts_mut(data_address, metadata);
+        return *(core::ptr::addr_of!(slice) as *const *mut [()] as *const *mut T)
     }
 }
