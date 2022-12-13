@@ -1,4 +1,4 @@
-#![cfg_attr(feature = "nightly", feature(int_roundings))]
+#![cfg_attr(feature = "nightly", feature(int_roundings, ptr_metadata))]
 #![cfg_attr(all(feature = "nightly", feature = "alloc"), feature(new_uninit))]
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(feature = "alloc_api", feature(allocator_api))]

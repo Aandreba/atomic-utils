@@ -1,13 +1,12 @@
-use core::{sync::atomic::{AtomicPtr, Ordering, AtomicUsize, AtomicIsize}, ptr::NonNull, iter::FusedIterator, alloc::Layout, mem::MaybeUninit, num::NonZeroUsize};
+use core::{sync::atomic::{AtomicPtr, Ordering, AtomicIsize}, ptr::NonNull, iter::FusedIterator, alloc::{Layout, LayoutError}, mem::MaybeUninit, num::NonZeroUsize, cell::UnsafeCell};
 use crate::{InnerFlag, FALSE, TRUE, AllocError};
 use core::fmt::Debug;
 #[cfg(feature = "alloc_api")]
 use {alloc::{alloc::Global}, core::alloc::*};
 
 // SAFETY: eight is not zero
-const DEFAULT_BLOCK_SIZE: NonZeroUsize = unsafe {
-    NonZeroUsize::new_unchecked(8)
-};
+const DEFAULT_BLOCK_SIZE: usize = 8;
+const SIZE_LIMIT: isize = 1isize << (isize::BITS - 2);
 
 macro_rules! impl_all {
     (impl $(@$tr:path =>)? $target:ident {
@@ -15,7 +14,7 @@ macro_rules! impl_all {
     }) => {
         cfg_if::cfg_if! {
             if #[cfg(feature = "alloc_api")] {
-                impl<T, A: Allocator> $($tr for)? $target <T, A> {
+                impl<T, A: Allocator + Clone> $($tr for)? $target <T, A> {
                     $($t)*
                 }
             } else {
@@ -34,15 +33,21 @@ struct NodeValue<T> {
     prev: *mut NodeValue<T>
 }
 
+#[repr(C)]
+struct Block<T> {
+    prev: Option<Box<Block<T>>>,
+    nodes: [MaybeUninit<NodeValue<T>>]
+}
+
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub struct FillQueue<T, #[cfg(feature = "alloc_api")] A: Allocator = Global> {
-    // Current block's firts value slot
-    head_block: AtomicPtr<NodeValue<T>>,
+    #[cfg(feature = "alloc_api")]
+    block: UnsafeCell<Option<Box<Block<T>>>>,
+    #[cfg(not(feature = "alloc_api"))]
+    block: UnsafeCell<Option<Box<Block<T>>>>,
+    block_size: usize,
     // Current block's head position
     idx: AtomicIsize,
-    block_size: usize,
-    #[cfg(feature = "alloc_api")]
-    alloc: A
 }
 
 impl<T> FillQueue<T> {
@@ -60,11 +65,10 @@ impl<T> FillQueue<T> {
 
     #[inline]
     pub const fn new_with_block_size (block_size: NonZeroUsize) -> Self {
-        const SIZE_LIMIT: usize = isize::MAX as usize;
         if block_size.get() >= SIZE_LIMIT { panic!("attempted to create a queue too big") }
 
         Self {
-            head_block: AtomicPtr::new(core::ptr::null_mut()),
+            block: UnsafeCell::new(None),
             idx: AtomicIsize::new((block_size.get() - 1) as isize),
             block_size: block_size.get(),
             #[cfg(feature = "alloc_api")]
@@ -74,7 +78,7 @@ impl<T> FillQueue<T> {
 }
 
 #[docfg::docfg(feature = "alloc_api")]
-impl<T, A: Allocator> FillQueue<T, A> {
+impl<T, A: Allocator + Clone> FillQueue<T, A> {
     /// Creates a new [`FillQueue`] with the given allocator.
     /// # Example
     /// ```rust
@@ -92,13 +96,7 @@ impl<T, A: Allocator> FillQueue<T, A> {
 
     #[inline(always)]
     pub const fn new_with_block_size_in (block_size: NonZeroUsize, alloc: A) -> Self {
-        let block_limit = block_size.get() - 1;
-        Self {
-            head_block: AtomicPtr::new(core::ptr::null_mut()),
-            idx: AtomicUsize::new(block_limit),
-            block_limit,
-            alloc
-        }
+        todo!()
     }
 
     /// Returns a reference to this queue's allocator.
@@ -137,7 +135,7 @@ impl_all! {
         /// ```
         #[inline(always)]
         pub fn is_empty (&self) -> bool {
-            self.head_block.load(Ordering::Relaxed).is_null()
+            self.block.load(Ordering::Relaxed).is_null()
         }
 
         /// Uses atomic operations to push an element to the queue.
@@ -187,11 +185,14 @@ impl_all! {
         /// assert_eq!(queue.chop().next(), Some(1));
         /// ```
         pub fn try_push (&self, v: T) -> Result<(), AllocError> {
-            const ADD_MASK: isize = isize::MIN.add_wraping(1);
+            // Bit structure
+            //  [1]     [1]       ...
+            //  ^^^     ^^^
+            //  Locked  Allocating
+            
+            const ALLOCATION_SETTER: isize = isize::MIN | SIZE_LIMIT;
 
-            // todo add with the mask, so when we add it is with locking possible chops
-
-            let (idx, ptr) = loop {
+            let idx = loop {
                 // Get index for our value 
                 let mut idx = self.idx.fetch_add(1, Ordering::AcqRel);
 
@@ -200,38 +201,63 @@ impl_all! {
                     // Avoid quick succesive additions to idx by checking in an inner loop the status of idx,
                     // thus avoiding danger to overflow back to positives
                     loop {
-                        if !self.idx.load(Ordering::Relaxed).is_negative() { break }
-                        #[cfg(feature = "std")]
-                        std::thread::yield_now();
+                        let idx = self.idx.load(Ordering::Relaxed);
+                        if !idx.is_negative() { break }
+
+                        match idx & SIZE_LIMIT {
+                            // We aren't allocating, so wait for the initialization, which should be fast
+                            0 => core::hint::spin_loop(),
+                            // If we are allocating, yield to the OS scheduler
+                            #[cfg(feature = "std")]
+                            _ => std::thread::yield_now(),
+                            // We don't have an OS to yield to
+                            #[cfg(not(feature = "std"))]
+                            _ => {}
+                        }
                     }
                 }
 
                 // There is no more space in the block
                 if idx >= self.block_size as isize {
-                    match self.idx.compare_exchange(idx, isize::MIN, Ordering::AcqRel, Ordering::Acquire) {
+                    match self.idx.compare_exchange(idx, ALLOCATION_SETTER, Ordering::AcqRel, Ordering::Acquire) {
                         // We get to create the new block
                         Ok(_) => {
                             // Allocate the equivalent of `Vec::with_capacity(block_size)`
-                            let layout = Layout::array::<NodeValue<T>>(self.block_size).map_err(|_| AllocError)?;
+                            let layout = Self::calculate_layout(self.block_size).map_err(|_| AllocError)?;
                             #[cfg(feature = "alloc_api")]
-                            let alloc: Result<NonNull<NodeValue<T>>, AllocError> = self.alloc.allocate(layout).map(NonNull::cast::<NodeValue<T>>);
+                            let alloc: Result<NonNull<u8>, AllocError> = self.alloc.allocate(layout).map(NonNull::cast::<u8>);
                             #[cfg(not(feature = "alloc_api"))]
-                            let alloc: Result<NonNull<NodeValue<T>>, AllocError> = NonNull::new(unsafe { alloc::alloc::alloc(layout).cast::<NodeValue<T>>() }).ok_or(AllocError);
+                            let alloc: Result<NonNull<u8>, AllocError> = NonNull::new(unsafe { alloc::alloc::alloc(layout) }).ok_or(AllocError);
 
                             let block = match alloc {
                                 Ok(x) => unsafe {
-                                    // Set the new head of the list
-                                    let prev = self.head.swap(x.as_mut_ptr(), Ordering::AcqRel);
-                                    // Initialize node
-                                    x.as_mut_ptr().write(NodeValue {
-                                        init: InnerFlag::new(FALSE),
-                                        v: MaybeUninit::uninit(),
-                                        prev
-                                    });
+                                    // Inform other threads that we are done allocating and they should stop yielding.
+                                    self.idx.store(isize::MIN, Ordering::Release);
 
+                                    // Create a fat pointer to the new block
+                                    #[cfg(feature = "nightly")]
+                                    let ptr: *mut Block<T> = core::ptr::from_raw_parts_mut(x.as_mut_ptr(), self.block_size);
+                                    #[cfg(not(feature = "nightly"))]
+                                    let ptr: *mut Block<T> = {
+                                        let dangling_slice = core::slice::from_raw_parts_mut(x.as_mut_ptr(), self.block_size);
+                                        core::mem::transmute(dangling_slice)
+                                    };
+
+                                    // Put the new block inside a `Box`
+                                    #[cfg(feature = "alloc_api")]
+                                    let block = Box::from_raw_in(ptr, self.alloc.clone());
+                                    #[cfg(not(feature = "alloc_api"))]
+                                    let block = Box::from_raw(ptr);
+
+                                    /* SAFETY: Since we've locked the current queue, we are the only thread with acces to the head */
+                                    // Set the new head block
+                                    let prev = core::mem::replace(&mut *self.block.get(), Some(block));
+                                    // Initialize block (specifically, set it's parent)
+                                    ptr.cast::<Option<Box<Block<T>>>>().write(prev);
+                                    
                                     // Next value must be at index 1 of the block, since 0 is the one we'll use
                                     self.idx.store(1, Ordering::Release);
-                                    break (0, x.as_mut_ptr())
+                                    break 0
                                 },
                                 
                                 Err(e) => {
@@ -284,6 +310,20 @@ impl_all! {
             Ok(())
         }
 
+        fn calculate_layout (len: usize) -> Result<Layout, LayoutError> {
+            let prev = Layout::new::<Option<Box<Block<T>>>>();
+            let nodes = Layout::array::<MaybeUninit<NodeValue<T>>>(len)?;
+            let padding = {
+                let len = prev.size();
+                let align = nodes.align();
+
+                let len_rounded_up = len.wrapping_add(align).wrapping_sub(1) & !align.wrapping_sub(1);
+                len_rounded_up.wrapping_sub(len)
+            };
+
+            return Layout::from_size_align(prev.size() + padding + nodes.len(), prev.align())
+        }
+
         /// Uses non-atomic operations to push an element to the queue.
         /// 
         /// # Safety
@@ -304,27 +344,7 @@ impl_all! {
         /// assert_eq!(queue.chop_mut().next(), Some(1));
         /// ```
         pub fn try_push_mut (&mut self, v: T) -> Result<(), AllocError> {
-            let node = FillQueueNode {
-                init: InnerFlag::new(TRUE),
-                prev: core::ptr::null_mut(),
-                v
-            };
-
-            let layout = Layout::new::<FillQueueNode<T>>();
-            #[cfg(feature = "alloc_api")]
-            let mut ptr = self.alloc.allocate(layout)?.cast::<FillQueueNode<T>>();
-            #[cfg(not(feature = "alloc_api"))]
-            let mut ptr = match unsafe { NonNull::new(alloc::alloc::alloc(layout)) } {
-                Some(x) => x.cast::<FillQueueNode<T>>(),
-                None => return Err(AllocError)
-            };
-            
-            unsafe {
-                ptr.as_ptr().write(node);
-                let prev = core::ptr::replace(self.head_block.get_mut(), ptr.as_ptr());
-                ptr.as_mut().prev = prev;
-                Ok(())
-            }
+            todo!()
         }
     }
 }
@@ -412,7 +432,7 @@ impl<T> FillQueue<T> {
     /// ```
     #[inline(always)]
     pub fn chop (&self) -> ChopIter<T> {
-        let ptr = self.head_block.swap(core::ptr::null_mut(), Ordering::AcqRel);
+        let ptr = self.block.swap(core::ptr::null_mut(), Ordering::AcqRel);
         ChopIter { 
             ptr: NonNull::new(ptr),
         }
@@ -440,7 +460,7 @@ impl<T> FillQueue<T> {
     #[inline(always)]
     pub fn chop_mut (&mut self) -> ChopIter<T> {
         let ptr = unsafe {
-            core::ptr::replace(self.head_block.get_mut(), core::ptr::null_mut())
+            core::ptr::replace(self.block.get_mut(), core::ptr::null_mut())
         };
 
         ChopIter { 
