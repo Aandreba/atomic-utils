@@ -1,12 +1,12 @@
-use core::{sync::atomic::{AtomicPtr, Ordering, AtomicIsize}, ptr::NonNull, iter::FusedIterator, alloc::{Layout, LayoutError}, mem::MaybeUninit, num::NonZeroUsize, cell::UnsafeCell};
-use crate::{InnerFlag, FALSE, TRUE, AllocError};
+use core::{sync::atomic::{AtomicPtr, Ordering, AtomicIsize}, ptr::NonNull, iter::FusedIterator, alloc::{Layout, LayoutError}, mem::MaybeUninit, num::NonZeroUsize, cell::UnsafeCell, marker::PhantomData};
+use crate::{InnerFlag, FALSE, AllocError};
 use core::fmt::Debug;
 #[cfg(feature = "alloc_api")]
 use {alloc::{alloc::Global}, core::alloc::*};
 
 // SAFETY: eight is not zero
 const DEFAULT_BLOCK_SIZE: usize = 8;
-const SIZE_LIMIT: isize = 1isize << (isize::BITS - 2);
+const ALLOCATION_MASK: isize = 1isize << (isize::BITS - 2);
 
 macro_rules! impl_all {
     (impl $(@$tr:path =>)? $target:ident {
@@ -35,19 +35,19 @@ struct NodeValue<T> {
 
 #[repr(C)]
 struct Block<T> {
-    prev: Option<Box<Block<T>>>,
+    prev: *mut Self,
     nodes: [MaybeUninit<NodeValue<T>>]
 }
 
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub struct FillQueue<T, #[cfg(feature = "alloc_api")] A: Allocator = Global> {
-    #[cfg(feature = "alloc_api")]
-    block: UnsafeCell<Option<Box<Block<T>>>>,
-    #[cfg(not(feature = "alloc_api"))]
-    block: UnsafeCell<Option<Box<Block<T>>>>,
+    block: AtomicPtr<()>,
     block_size: usize,
     // Current block's head position
     idx: AtomicIsize,
+    _phtm: PhantomData<T>,
+    #[cfg(feature = "alloc_api")]
+    alloc: A
 }
 
 impl<T> FillQueue<T> {
@@ -65,12 +65,13 @@ impl<T> FillQueue<T> {
 
     #[inline]
     pub const fn new_with_block_size (block_size: NonZeroUsize) -> Self {
-        if block_size.get() >= SIZE_LIMIT { panic!("attempted to create a queue too big") }
+        if block_size.get() >= ALLOCATION_MASK { panic!("attempted to create a queue too big") }
 
         Self {
-            block: UnsafeCell::new(None),
+            block: AtomicPtr::new(NonNull::dangling().as_ptr()),
             idx: AtomicIsize::new((block_size.get() - 1) as isize),
             block_size: block_size.get(),
+            _phtm: PhantomData,
             #[cfg(feature = "alloc_api")]
             alloc: Global
         }
@@ -186,40 +187,54 @@ impl_all! {
         /// ```
         pub fn try_push (&self, v: T) -> Result<(), AllocError> {
             // Bit structure
-            //  [1]     [1]       ...
-            //  ^^^     ^^^
-            //  Locked  Allocating
-            
-            const ALLOCATION_SETTER: isize = isize::MIN | SIZE_LIMIT;
+            //  [1]       ...
+            //  ^^^
+            //  Allocating
 
             let idx = loop {
-                // Get index for our value 
-                let mut idx = self.idx.fetch_add(1, Ordering::AcqRel);
+                // Get block for our value
+                let mut block = self.block.load(Ordering::SeqCst);
 
-                // New block is being created, wait for it to be done
-                if idx.is_negative() {
-                    // Avoid quick succesive additions to idx by checking in an inner loop the status of idx,
-                    // thus avoiding danger to overflow back to positives
+                // If no block is available right now, someone must be doing something important.
+                // We'll wait.
+                if block.is_null() {
                     loop {
+                        // This wait should be done any time
+                        core::hint::spin_loop();
+                        block = self.block.load(Ordering::Relaxed);
+                        if !block.is_null() { break }
+                    }
+                    continue
+                }
+
+                // Get index for our value
+                let mut idx = self.idx.fetch_add(1, Ordering::SeqCst);
+
+                // Some operation is being done with the block, wait for it to finish
+                if idx.is_negative() {
+                    loop {
+                        // We aren't allocating, so this wait should be fast
+                        core::hint::spin_loop();
                         let idx = self.idx.load(Ordering::Relaxed);
                         if !idx.is_negative() { break }
-
-                        match idx & SIZE_LIMIT {
-                            // We aren't allocating, so wait for the initialization, which should be fast
-                            0 => core::hint::spin_loop(),
-                            // If we are allocating, yield to the OS scheduler
-                            #[cfg(feature = "std")]
-                            _ => std::thread::yield_now(),
-                            // We don't have an OS to yield to
-                            #[cfg(not(feature = "std"))]
-                            _ => {}
-                        }
                     }
+                    continue;
+                }
+
+                // Someone is allocating a new block
+                if idx & ALLOCATION_MASK != 0 {
+                    loop {
+                        #[cfg(feature = "std")]
+                        std::thread::yield_now();
+                        let idx = self.idx.load(Ordering::Relaxed);
+                        if idx & ALLOCATION_MASK == 0 { break }
+                    }
+                    continue;
                 }
 
                 // There is no more space in the block
                 if idx >= self.block_size as isize {
-                    match self.idx.compare_exchange(idx, ALLOCATION_SETTER, Ordering::AcqRel, Ordering::Acquire) {
+                    match self.idx.compare_exchange(idx, ALLOCATION_MASK, Ordering::AcqRel, Ordering::Acquire) {
                         // We get to create the new block
                         Ok(_) => {
                             // Allocate the equivalent of `Vec::with_capacity(block_size)`
@@ -233,21 +248,6 @@ impl_all! {
                                 Ok(x) => unsafe {
                                     // Inform other threads that we are done allocating and they should stop yielding.
                                     self.idx.store(isize::MIN, Ordering::Release);
-
-                                    // Create a fat pointer to the new block
-                                    #[cfg(feature = "nightly")]
-                                    let ptr: *mut Block<T> = core::ptr::from_raw_parts_mut(x.as_mut_ptr(), self.block_size);
-                                    #[cfg(not(feature = "nightly"))]
-                                    let ptr: *mut Block<T> = {
-                                        let dangling_slice = core::slice::from_raw_parts_mut(x.as_mut_ptr(), self.block_size);
-                                        core::mem::transmute(dangling_slice)
-                                    };
-
-                                    // Put the new block inside a `Box`
-                                    #[cfg(feature = "alloc_api")]
-                                    let block = Box::from_raw_in(ptr, self.alloc.clone());
-                                    #[cfg(not(feature = "alloc_api"))]
-                                    let block = Box::from_raw(ptr);
 
                                     /* SAFETY: Since we've locked the current queue, we are the only thread with acces to the head */
                                     // Set the new head block
