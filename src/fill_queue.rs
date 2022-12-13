@@ -210,7 +210,7 @@ impl_all! {
 
                 // There is no more space in the block
                 if block.is_null() || idx >= self.block_size as isize {
-                    match self.idx.compare_exchange(idx, ALLOCATION_MASK, Ordering::SeqCst, Ordering::SeqCst) {
+                    match self.idx.compare_exchange(idx + 1, ALLOCATION_MASK, Ordering::SeqCst, Ordering::SeqCst) {
                         // We get to create the new block
                         Ok(_) => {
                             // Allocate the equivalent of `Vec::with_capacity(block_size)`
@@ -430,6 +430,8 @@ impl<T> FillQueue<T> {
 
         ChopIter {
             ptr: NonNull::new(crate::ptr_from_raw_parts_mut(ptr.cast(), len)),
+            #[cfg(not(feature = "nightly"))]
+            block_size: self.block_size,
             range
         }
     }
@@ -473,9 +475,13 @@ cfg_if::cfg_if! {
     }
 }
 
+// todo drop
+
 /// Iterator of [`FillQueue::chop`] and [`FillQueue::chop_mut`]
 pub struct ChopIter<T, #[cfg(feature = "alloc_api")] A: Allocator = Global> {
     ptr: Option<NonNull<Block<T>>>,
+    #[cfg(not(feature = "nightly"))]
+    block_size: usize,
     range: Range<usize>,
     #[cfg(feature = "alloc_api")]
     alloc: A
@@ -487,7 +493,7 @@ impl_all! {
 
         #[inline]
         fn next(&mut self) -> Option<Self::Item> {
-            if let Some(ptr) = self.ptr {
+            while let Some(ptr) = self.ptr {
                 unsafe {
                     let block = &*ptr.as_ptr();
 
@@ -496,7 +502,7 @@ impl_all! {
                         core::hint::spin_loop()
                     }
 
-                    if let Some(i) = self.range.next() {
+                    if let Some(i) = self.range.next_back() {
                         let node = block.nodes.get_unchecked(i);
 
                         // Wait for node to initialize (shouldn't be long)
@@ -506,14 +512,18 @@ impl_all! {
 
                         return Some((&*node.v.get()).assume_init_read())
                     }
-                    
-                    // !! TODO DEALLOC !!
-                    /*#[cfg(feature = "alloc_api")]
-                    self.alloc.deallocate(ptr.cast(), Layout::new::<Block<T>>());
-                    #[cfg(not(feature = "alloc_api"))]
-                    alloc::alloc::dealloc(ptr.as_ptr().cast(), Layout::new::<Block<T>>());*/
 
-                    todo!()
+                    self.ptr = NonNull::new(block.prev);
+                    #[cfg(feature = "nightly")]
+                    { self.range = 0..core::ptr::metadata(block.prev) };
+                    #[cfg(not(feature = "nightly"))]
+                    { self.range = 0..(if block.prev.is_null() { 0 } else { self.block_size }) };
+
+                    let (layout, _, _) = FillQueue::<T>::calculate_layout(block.nodes.len()).unwrap();
+                    #[cfg(feature = "alloc_api")]
+                    self.alloc.deallocate(ptr.cast(), layout);
+                    #[cfg(not(feature = "alloc_api"))]
+                    alloc::alloc::dealloc(ptr.as_ptr().cast(), layout);
                 }
             }
             return None
