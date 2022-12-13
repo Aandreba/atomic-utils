@@ -1,4 +1,4 @@
-#![cfg_attr(feature = "nightly", feature(int_roundings, ptr_metadata))]
+#![cfg_attr(feature = "nightly", feature(int_roundings, ptr_metadata, alloc_layout_extra))]
 #![cfg_attr(all(feature = "nightly", feature = "alloc"), feature(new_uninit))]
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(feature = "alloc_api", feature(allocator_api))]
@@ -91,5 +91,19 @@ cfg_if::cfg_if! {
         pub(crate) type InnerFlag = core::sync::atomic::AtomicUsize;
         const TRUE : usize = 1;
         const FALSE : usize = 0;
+    }
+}
+
+#[cfg(feature = "nightly")]
+pub(crate) use core::ptr::from_raw_parts_mut as ptr_from_raw_parts_mut;
+
+#[cfg(not(feature = "nightly"))]
+#[inline]
+pub const fn ptr_from_raw_parts_mut<T: ?Sized + Pointee<Metadata = usize>>(
+    data_address: *mut (),
+    metadata: <T as Pointee>::Metadata,
+) -> *mut T {
+    unsafe {
+        return core::mem::transmute(core::slice::from_raw_parts_mut(data_address, metadata));
     }
 }

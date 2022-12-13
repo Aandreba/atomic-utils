@@ -1,11 +1,10 @@
-use core::{sync::atomic::{AtomicPtr, Ordering, AtomicIsize}, ptr::NonNull, iter::FusedIterator, alloc::{Layout, LayoutError}, mem::MaybeUninit, num::NonZeroUsize, cell::UnsafeCell, marker::PhantomData};
-use crate::{InnerFlag, FALSE, AllocError};
-use core::fmt::Debug;
+use core::{sync::atomic::{AtomicPtr, Ordering, AtomicIsize}, ptr::NonNull, alloc::{Layout, LayoutError}, mem::MaybeUninit, num::NonZeroUsize, marker::PhantomData, cell::UnsafeCell};
+use crate::{InnerFlag, FALSE, AllocError, TRUE};
 #[cfg(feature = "alloc_api")]
 use {alloc::{alloc::Global}, core::alloc::*};
 
 // SAFETY: eight is not zero
-const DEFAULT_BLOCK_SIZE: usize = 8;
+const DEFAULT_BLOCK_SIZE: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(8) };
 const ALLOCATION_MASK: isize = 1isize << (isize::BITS - 2);
 
 macro_rules! impl_all {
@@ -14,7 +13,7 @@ macro_rules! impl_all {
     }) => {
         cfg_if::cfg_if! {
             if #[cfg(feature = "alloc_api")] {
-                impl<T, A: Allocator + Clone> $($tr for)? $target <T, A> {
+                impl<T, A: Allocator> $($tr for)? $target <T, A> {
                     $($t)*
                 }
             } else {
@@ -26,22 +25,22 @@ macro_rules! impl_all {
     };
 }
 
-struct NodeValue<T> {
+#[repr(C)]
+struct Node<T> {
     init: InnerFlag,
-    v: MaybeUninit<T>,
-    // only first elements of a block have a parent set, and that parent may be null
-    prev: *mut NodeValue<T>
+    v: UnsafeCell<MaybeUninit<T>>
 }
 
 #[repr(C)]
 struct Block<T> {
+    init: InnerFlag,
     prev: *mut Self,
-    nodes: [MaybeUninit<NodeValue<T>>]
+    nodes: [Node<T>]
 }
 
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub struct FillQueue<T, #[cfg(feature = "alloc_api")] A: Allocator = Global> {
-    block: AtomicPtr<()>,
+    block: AtomicPtr<u8>,
     block_size: usize,
     // Current block's head position
     idx: AtomicIsize,
@@ -65,10 +64,10 @@ impl<T> FillQueue<T> {
 
     #[inline]
     pub const fn new_with_block_size (block_size: NonZeroUsize) -> Self {
-        if block_size.get() >= ALLOCATION_MASK { panic!("attempted to create a queue too big") }
+        if block_size.get() >= ALLOCATION_MASK as usize { panic!("attempted to create a queue too big") }
 
         Self {
-            block: AtomicPtr::new(NonNull::dangling().as_ptr()),
+            block: AtomicPtr::new(core::ptr::null_mut()),
             idx: AtomicIsize::new((block_size.get() - 1) as isize),
             block_size: block_size.get(),
             _phtm: PhantomData,
@@ -136,7 +135,7 @@ impl_all! {
         /// ```
         #[inline(always)]
         pub fn is_empty (&self) -> bool {
-            self.block.load(Ordering::Relaxed).is_null()
+            todo!()
         }
 
         /// Uses atomic operations to push an element to the queue.
@@ -191,21 +190,9 @@ impl_all! {
             //  ^^^
             //  Allocating
 
-            let idx = loop {
+            let (idx, block) = loop {
                 // Get block for our value
-                let mut block = self.block.load(Ordering::SeqCst);
-
-                // If no block is available right now, someone must be doing something important.
-                // We'll wait.
-                if block.is_null() {
-                    loop {
-                        // This wait should be done any time
-                        core::hint::spin_loop();
-                        block = self.block.load(Ordering::Relaxed);
-                        if !block.is_null() { break }
-                    }
-                    continue
-                }
+                let block = self.block.load(Ordering::SeqCst);
 
                 // Get index for our value
                 let mut idx = self.idx.fetch_add(1, Ordering::SeqCst);
@@ -233,36 +220,49 @@ impl_all! {
                 }
 
                 // There is no more space in the block
-                if idx >= self.block_size as isize {
+                if block.is_null() || idx >= self.block_size as isize {
                     match self.idx.compare_exchange(idx, ALLOCATION_MASK, Ordering::AcqRel, Ordering::Acquire) {
                         // We get to create the new block
                         Ok(_) => {
                             // Allocate the equivalent of `Vec::with_capacity(block_size)`
-                            let layout = Self::calculate_layout(self.block_size).map_err(|_| AllocError)?;
+                            let (layout, prev_offset, nodes_offset) = Self::calculate_layout(self.block_size).map_err(|_| AllocError)?;
                             #[cfg(feature = "alloc_api")]
                             let alloc: Result<NonNull<u8>, AllocError> = self.alloc.allocate(layout).map(NonNull::cast::<u8>);
                             #[cfg(not(feature = "alloc_api"))]
                             let alloc: Result<NonNull<u8>, AllocError> = NonNull::new(unsafe { alloc::alloc::alloc(layout) }).ok_or(AllocError);
 
-                            let block = match alloc {
-                                Ok(x) => unsafe {
+                            match alloc {
+                                Ok(ptr) => unsafe {
                                     // Inform other threads that we are done allocating and they should stop yielding.
                                     self.idx.store(isize::MIN, Ordering::Release);
 
-                                    /* SAFETY: Since we've locked the current queue, we are the only thread with acces to the head */
+                                    // Initialize all nodes (by setting them as uninitialized)
+                                    let nodes = ptr.as_ptr().add(nodes_offset).cast::<Node<T>>();
+                                    for i in 0..self.block_size {
+                                        nodes.add(i).cast::<InnerFlag>().write(InnerFlag::new(FALSE));
+                                    }
+
+                                    // Mark node as uninitialized before we put it in
+                                    ptr.as_ptr().cast::<InnerFlag>().write(InnerFlag::new(FALSE));
+
                                     // Set the new head block
-                                    let prev = core::mem::replace(&mut *self.block.get(), Some(block));
+                                    let prev = self.block.swap(ptr.as_ptr(), Ordering::SeqCst);
+
                                     // Initialize block (specifically, set it's parent)
-                                    ptr.cast::<Option<Box<Block<T>>>>().write(prev);
+                                    let prev = crate::ptr_from_raw_parts_mut(prev.cast(), if prev.is_null() { 0 } else { self.block_size });
+                                    ptr.as_ptr().add(prev_offset).cast::<*mut Block<T>>().write(prev);
+
+                                    // Mark node as initialized
+                                    (&*ptr.as_ptr().cast::<InnerFlag>()).store(TRUE, Ordering::Release);
                                     
                                     // Next value must be at index 1 of the block, since 0 is the one we'll use
                                     self.idx.store(1, Ordering::Release);
-                                    break 0
+                                    break (0, crate::ptr_from_raw_parts_mut::<Block<T>>(ptr.as_ptr().cast(), self.block_size))
                                 },
                                 
                                 Err(e) => {
                                     // Give someone else the chance to allocate the new block
-                                    self.idx.store(self.block_size, Ordering::Release);
+                                    self.idx.store(self.block_size as isize, Ordering::Release);
                                     return Err(e)
                                 }
                             };
@@ -273,55 +273,61 @@ impl_all! {
                     }
                 }
 
-                let ptr = self.ptr.load(Ordering::Acquire);
-                break (idx, todo!())
+                break (idx, crate::ptr_from_raw_parts_mut::<Block<T>>(block.cast(), if block.is_null() { 0 } else { self.block_size }))
             };
 
-            // There is no more space in the block
-            let my_node = 0;
-
-            /*
-            let node = FillQueueNode {
-                init: InnerFlag::new(FALSE),
-                prev: core::ptr::null_mut(),
-                v
-            };
-
-            let layout = Layout::new::<FillQueueNode<T>>();
-            #[cfg(feature = "alloc_api")]
-            let ptr = self.alloc.allocate(layout)?.cast::<FillQueueNode<T>>();
-            #[cfg(not(feature = "alloc_api"))]
-            let ptr = match unsafe { NonNull::new(alloc::alloc::alloc(layout)) } {
-                Some(x) => x.cast::<FillQueueNode<T>>(),
-                None => return Err(AllocError)
-            };
-
+            // Initialize the appropiate node
             unsafe {
-                ptr.as_ptr().write(node)
+                let block = &mut *block;
+                let node = block.nodes.get_unchecked(idx as usize);
+                (&mut *node.v.get()).write(v);
+                node.init.store(TRUE, Ordering::Release);
             }
-
-            let prev = self.head_block.swap(ptr.as_ptr(), Ordering::AcqRel);
-            unsafe {
-                let rf = &mut *ptr.as_ptr();
-                rf.prev = prev;
-                rf.init.store(TRUE, Ordering::Release);
-            }*/
 
             Ok(())
         }
 
-        fn calculate_layout (len: usize) -> Result<Layout, LayoutError> {
-            let prev = Layout::new::<Option<Box<Block<T>>>>();
-            let nodes = Layout::array::<MaybeUninit<NodeValue<T>>>(len)?;
-            let padding = {
-                let len = prev.size();
-                let align = nodes.align();
+        fn calculate_layout (len: usize) -> Result<(Layout, usize, usize), LayoutError> {
+            #[inline]
+            fn add_field (parent: Layout, field: Layout) -> Result<(Layout, usize), LayoutError> {
+                #[cfg(feature = "nightly")]
+                let padding = parent.padding_needed_for(field.align());
+                #[cfg(not(feature = "nightly"))]
+                let padding = {
+                    let len = self.size();
+                    let align = field.align();
 
-                let len_rounded_up = len.wrapping_add(align).wrapping_sub(1) & !align.wrapping_sub(1);
-                len_rounded_up.wrapping_sub(len)
-            };
+                    // Rounded up value is:
+                    //   len_rounded_up = (len + align - 1) & !(align - 1);
+                    // and then we return the padding difference: `len_rounded_up - len`.
+                    //
+                    // We use modular arithmetic throughout:
+                    //
+                    // 1. align is guaranteed to be > 0, so align - 1 is always
+                    //    valid.
+                    //
+                    // 2. `len + align - 1` can overflow by at most `align - 1`,
+                    //    so the &-mask with `!(align - 1)` will ensure that in the
+                    //    case of overflow, `len_rounded_up` will itself be 0.
+                    //    Thus the returned padding, when added to `len`, yields 0,
+                    //    which trivially satisfies the alignment `align`.
+                    //
+                    // (Of course, attempts to allocate blocks of memory whose
+                    // size and padding overflow in the above manner should cause
+                    // the allocator to yield an error anyway.)
 
-            return Layout::from_size_align(prev.size() + padding + nodes.len(), prev.align())
+                    let len_rounded_up = len.wrapping_add(align).wrapping_sub(1) & !align.wrapping_sub(1);
+                    len_rounded_up.wrapping_sub(len)
+                };
+
+                let offset = parent.size() + padding;
+                return Ok((Layout::from_size_align(offset + field.size(), parent.align())?, offset))
+            }
+
+            let result = Layout::new::<InnerFlag>();
+            let (result, prev) = add_field(result, Layout::new::<*mut Block<T>>())?;
+            let (result, nodes) = add_field(result, Layout::array::<Node<T>>(len)?)?;
+            return Ok((result, prev, nodes))
         }
 
         /// Uses non-atomic operations to push an element to the queue.
@@ -349,6 +355,7 @@ impl_all! {
     }
 }
 
+/*
 #[cfg(feature = "alloc_api")]
 impl<T, A: Allocator> FillQueue<T, A> {
     /// Returns a LIFO (Last In First Out) iterator over a chopped chunk of a [`FillQueue`].
@@ -555,3 +562,4 @@ impl<T> Debug for FillQueue<T> {
         f.debug_struct("FillQueue").finish_non_exhaustive()
     }
 }
+*/
