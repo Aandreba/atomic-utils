@@ -606,6 +606,13 @@ cfg_if::cfg_if! {
     }
 }
 
+impl<T> Drop for FillQueue<T> {
+    #[inline]
+    fn drop(&mut self) {
+        let _ = self.chop_mut();
+    }
+}
+
 /// Iterator of [`FillQueue::chop`] and [`FillQueue::chop_mut`]
 pub struct ChopIter<T, #[cfg(feature = "alloc_api")] A: Allocator = Global> {
     ptr: Option<NonNull<Block<T>>>,

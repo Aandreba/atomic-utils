@@ -1,17 +1,17 @@
-use std::{thread::{available_parallelism, sleep}, time::{Duration}, num::NonZeroUsize};
+use std::{thread::{available_parallelism, sleep}, num::NonZeroUsize};
 use std::sync::atomic::{AtomicUsize, Ordering, AtomicBool};
 use utils_atomics::*;
 use rand::random;
 
-const RUNS: usize = 200_000;
+const RUNS: usize = 20;
 
 #[cfg(feature = "alloc")]
 #[test]
 fn stress_fill_queue () {
-
     let queue: FillQueue<i32> = FillQueue::new();
     let mut pushed = AtomicUsize::new(0);
     let mut chopped = AtomicUsize::new(0);
+    println!("initialized");
 
     std::thread::scope(|s| {
         for _ in 1..(available_parallelism().unwrap().get() / 2) {
@@ -20,16 +20,16 @@ fn stress_fill_queue () {
                     let v = random::<i32>();
                     queue.push(v);
                     pushed.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
-                    //println!("looped 1")
                 }
+                println!("thread 1 done!");
             });
 
             s.spawn(|| {
                 for _ in 0..RUNS {
                     let count = queue.chop().count();
                     chopped.fetch_add(count, std::sync::atomic::Ordering::AcqRel);
-                    //println!("looped 2")
                 }
+                println!("thread 2 done!");
             });
         }
     });
