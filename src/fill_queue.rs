@@ -1,11 +1,11 @@
-use core::{sync::atomic::{AtomicPtr, Ordering, AtomicIsize}, ptr::NonNull, alloc::{Layout, LayoutError}, mem::MaybeUninit, num::NonZeroUsize, marker::PhantomData, cell::UnsafeCell};
+use core::{sync::atomic::{AtomicPtr, Ordering, AtomicIsize}, ptr::NonNull, alloc::{Layout, LayoutError}, mem::MaybeUninit, num::NonZeroUsize, marker::PhantomData, cell::UnsafeCell, ops::Range};
 use crate::{InnerFlag, FALSE, AllocError, TRUE};
 #[cfg(feature = "alloc_api")]
 use {alloc::{alloc::Global}, core::alloc::*};
 
 // SAFETY: eight is not zero
 const DEFAULT_BLOCK_SIZE: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(8) };
-const ALLOCATION_MASK: isize = 1isize << (isize::BITS - 2);
+const ALLOCATION_MASK: isize = isize::MIN;
 
 macro_rules! impl_all {
     (impl $(@$tr:path =>)? $target:ident {
@@ -68,7 +68,7 @@ impl<T> FillQueue<T> {
 
         Self {
             block: AtomicPtr::new(core::ptr::null_mut()),
-            idx: AtomicIsize::new((block_size.get() - 1) as isize),
+            idx: AtomicIsize::new(0),
             block_size: block_size.get(),
             _phtm: PhantomData,
             #[cfg(feature = "alloc_api")]
@@ -195,33 +195,22 @@ impl_all! {
                 let block = self.block.load(Ordering::SeqCst);
 
                 // Get index for our value
-                let mut idx = self.idx.fetch_add(1, Ordering::SeqCst);
+                let idx = self.idx.fetch_add(1, Ordering::SeqCst);
 
-                // Some operation is being done with the block, wait for it to finish
-                if idx.is_negative() {
+                // Someone is allocating a new block
+                if idx.is_negative()  {
                     loop {
-                        // We aren't allocating, so this wait should be fast
-                        core::hint::spin_loop();
+                        #[cfg(feature = "std")]
+                        std::thread::yield_now();
                         let idx = self.idx.load(Ordering::Relaxed);
                         if !idx.is_negative() { break }
                     }
                     continue;
                 }
 
-                // Someone is allocating a new block
-                if idx & ALLOCATION_MASK != 0 {
-                    loop {
-                        #[cfg(feature = "std")]
-                        std::thread::yield_now();
-                        let idx = self.idx.load(Ordering::Relaxed);
-                        if idx & ALLOCATION_MASK == 0 { break }
-                    }
-                    continue;
-                }
-
                 // There is no more space in the block
                 if block.is_null() || idx >= self.block_size as isize {
-                    match self.idx.compare_exchange(idx, ALLOCATION_MASK, Ordering::AcqRel, Ordering::Acquire) {
+                    match self.idx.compare_exchange(idx, ALLOCATION_MASK, Ordering::SeqCst, Ordering::SeqCst) {
                         // We get to create the new block
                         Ok(_) => {
                             // Allocate the equivalent of `Vec::with_capacity(block_size)`
@@ -355,7 +344,6 @@ impl_all! {
     }
 }
 
-/*
 #[cfg(feature = "alloc_api")]
 impl<T, A: Allocator> FillQueue<T, A> {
     /// Returns a LIFO (Last In First Out) iterator over a chopped chunk of a [`FillQueue`].
@@ -378,11 +366,7 @@ impl<T, A: Allocator> FillQueue<T, A> {
     /// ```
     #[inline(always)]
     pub fn chop (&self) -> ChopIter<T, A> where A: Clone {
-        let ptr = self.head.swap(core::ptr::null_mut(), Ordering::AcqRel);
-        ChopIter { 
-            ptr: NonNull::new(ptr),
-            alloc: self.alloc.clone()
-        }
+        todo!()
     }
 
     /// Returns a LIFO (Last In First Out) iterator over a chopped chunk of a [`FillQueue`]. The chopping is done with non-atomic operations.
@@ -406,14 +390,7 @@ impl<T, A: Allocator> FillQueue<T, A> {
     /// ```
     #[inline(always)]
     pub fn chop_mut (&mut self) -> ChopIter<T, A> where A: Clone {
-        let ptr = unsafe {
-            core::ptr::replace(self.head.get_mut(), core::ptr::null_mut())
-        };
-
-        ChopIter { 
-            ptr: NonNull::new(ptr),
-            alloc: self.alloc.clone()
-        }
+        todo!()
     }
 }
 
@@ -439,9 +416,21 @@ impl<T> FillQueue<T> {
     /// ```
     #[inline(always)]
     pub fn chop (&self) -> ChopIter<T> {
-        let ptr = self.block.swap(core::ptr::null_mut(), Ordering::AcqRel);
-        ChopIter { 
-            ptr: NonNull::new(ptr),
+        let ptr = self.block.swap(core::ptr::null_mut(), Ordering::SeqCst);
+        let len = if ptr.is_null() { 0 } else { self.block_size };
+        let limit = self.idx.swap(0, Ordering::SeqCst);
+        let range;
+
+        // New block is being allocated, which means this one is full 
+        if limit.is_negative() {
+            range = 0..len
+        } else {
+            range = 0..(limit as usize)
+        }
+
+        ChopIter {
+            ptr: NonNull::new(crate::ptr_from_raw_parts_mut(ptr.cast(), len)),
+            range
         }
     }
 
@@ -466,13 +455,7 @@ impl<T> FillQueue<T> {
     /// ```
     #[inline(always)]
     pub fn chop_mut (&mut self) -> ChopIter<T> {
-        let ptr = unsafe {
-            core::ptr::replace(self.block.get_mut(), core::ptr::null_mut())
-        };
-
-        ChopIter { 
-            ptr: NonNull::new(ptr)
-        }
+        todo!()
     }
 }
 
@@ -492,7 +475,8 @@ cfg_if::cfg_if! {
 
 /// Iterator of [`FillQueue::chop`] and [`FillQueue::chop_mut`]
 pub struct ChopIter<T, #[cfg(feature = "alloc_api")] A: Allocator = Global> {
-    ptr: Option<NonNull<FillQueueNode<T>>>,
+    ptr: Option<NonNull<Block<T>>>,
+    range: Range<usize>,
     #[cfg(feature = "alloc_api")]
     alloc: A
 }
@@ -505,20 +489,34 @@ impl_all! {
         fn next(&mut self) -> Option<Self::Item> {
             if let Some(ptr) = self.ptr {
                 unsafe {
-                    let node = core::ptr::read(ptr.as_ptr());
+                    let block = &*ptr.as_ptr();
 
-                    #[cfg(feature = "alloc_api")]
-                    self.alloc.deallocate(ptr.cast(), Layout::new::<FillQueueNode<T>>());
+                    // Wait for block to initialize (shouldn't be long)
+                    while block.init.load(Ordering::Acquire) == FALSE {
+                        core::hint::spin_loop()
+                    }
+
+                    if let Some(i) = self.range.next() {
+                        let node = block.nodes.get_unchecked(i);
+
+                        // Wait for node to initialize (shouldn't be long)
+                        while node.init.load(Ordering::Acquire) == FALSE {
+                            core::hint::spin_loop()
+                        }
+
+                        return Some((&*node.v.get()).assume_init_read())
+                    }
+                    
+                    // !! TODO DEALLOC !!
+                    /*#[cfg(feature = "alloc_api")]
+                    self.alloc.deallocate(ptr.cast(), Layout::new::<Block<T>>());
                     #[cfg(not(feature = "alloc_api"))]
-                    alloc::alloc::dealloc(ptr.as_ptr().cast(), Layout::new::<FillQueueNode<T>>());
+                    alloc::alloc::dealloc(ptr.as_ptr().cast(), Layout::new::<Block<T>>());*/
 
-                    while node.init.load(Ordering::Acquire) == FALSE { core::hint::spin_loop() }
-                    self.ptr = NonNull::new(node.prev);
-                    return Some(node.v)
+                    todo!()
                 }
             }
-
-            None
+            return None
         }
     }
 }
@@ -527,39 +525,22 @@ impl_all! {
     impl @Drop => ChopIter {
         #[inline]
         fn drop(&mut self) {
-            while let Some(ptr) = self.ptr {
-                unsafe {
-                    let node = core::ptr::read(ptr.as_ptr());
-                    
-                    #[cfg(feature = "alloc_api")]
-                    self.alloc.deallocate(ptr.cast(), Layout::new::<FillQueueNode<T>>());
-                    #[cfg(not(feature = "alloc_api"))]
-                    alloc::alloc::dealloc(ptr.as_ptr().cast(), Layout::new::<FillQueueNode<T>>());
-                    
-                    while node.init.load(Ordering::Acquire) == FALSE { core::hint::spin_loop() }
-                    self.ptr = NonNull::new(node.prev);
-                }
-            }
+            self.for_each(core::mem::drop)
         }
     }
 }
 
-impl_all! {
-    impl @FusedIterator => ChopIter {}
-}
-
 #[cfg(feature = "alloc_api")]
-impl<T, A: Debug + Allocator> Debug for FillQueue<T, A> {
+impl<T, A: core::fmt::Debug + Allocator> Debug for FillQueue<T, A> {
     #[inline]
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         f.debug_struct("FillQueue").field("alloc", &self.alloc).finish_non_exhaustive()
     }
 }
 #[cfg(not(feature = "alloc_api"))]
-impl<T> Debug for FillQueue<T> {
+impl<T> core::fmt::Debug for FillQueue<T> {
     #[inline]
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
         f.debug_struct("FillQueue").finish_non_exhaustive()
     }
 }
-*/

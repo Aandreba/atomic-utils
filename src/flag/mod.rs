@@ -3,6 +3,7 @@ pub(super) type Lock = std::thread::Thread;
 #[cfg(not(feature = "std"))]
 pub(super) type Lock = alloc::sync::Arc<()>;
 
+/*
 /// Multiple producer - Multiple consumer flag
 pub mod mpmc;
 
@@ -25,3 +26,4 @@ pub(super) fn lock_wake (#[allow(unused)] lock: Lock) {
     #[cfg(feature = "std")]
     lock.unpark();
 } 
+*/
