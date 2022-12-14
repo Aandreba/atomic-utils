@@ -293,6 +293,15 @@ impl_all! {
         }
 
         const fn calculate_layout (len: usize) -> Result<(Layout, usize, usize), LayoutError> {
+            macro_rules! tri {
+                ($e:expr) => {
+                    match $e {
+                        Ok(x) => x,
+                        Err(e) => return Err(e)
+                    }
+                };
+            }
+
             #[inline]
             const fn add_field (parent: Layout, field: Layout) -> Result<(Layout, usize), LayoutError> {
                 #[cfg(feature = "nightly")]
@@ -326,8 +335,7 @@ impl_all! {
                 };
 
                 let offset = parent.size() + padding;
-                #[allow(deprecated)]
-                let layout = r#try! {
+                let layout = tri! {
                     Layout::from_size_align(offset + field.size(), match parent.align() <= field.align() {
                         true => field.align(),
                         false => parent.align(),
@@ -337,14 +345,11 @@ impl_all! {
             }
 
             let result = Layout::new::<InnerFlag>();
+            let (result, prev) = tri! { add_field(result, Layout::new::<*mut Block<T>>()) };
 
-            #[allow(deprecated)]
-            let (result, prev) = r#try! { add_field(result, Layout::new::<*mut Block<T>>()) };
-
-            #[allow(deprecated)]
             #[cfg(not(feature = "nightly"))]
-            let (result, nodes) = r#try! { 
-                add_field(result, r#try! {{
+            let (result, nodes) = tri! { 
+                add_field(result, tri! {{
                     #[inline]
                     const fn inner(
                         element_size: usize,
@@ -374,9 +379,8 @@ impl_all! {
                 }})
             };
 
-            #[allow(deprecated)]
             #[cfg(feature = "nightly")]
-            let (result, nodes) = r#try! { add_field(result, r#try! { Layout::array::<Node<T>>(len) }) };
+            let (result, nodes) = tri! { add_field(result, tri! { Layout::array::<Node<T>>(len) }) };
 
             return Ok((result, prev, nodes))
         }
