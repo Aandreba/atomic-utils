@@ -1,3 +1,4 @@
 .vscode
+alloc.txt
 /target
 /Cargo.lock
