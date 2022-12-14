@@ -37,6 +37,8 @@ test stress_fill_queue ... FAILED
 #[cfg(feature = "alloc_api")]
 #[test]
 fn stress_fill_queue () {
+    use core::time::Duration;
+    
     let alloc = debug_alloc::DebugAlloc::new(std::alloc::Global, std::fs::File::create("alloc.txt").unwrap());
     let queue: FillQueue<i32, _> = FillQueue::new_in(&alloc);
 
@@ -45,22 +47,24 @@ fn stress_fill_queue () {
     println!("initialized");
 
     std::thread::scope(|s| {
-        for _ in 0..3 {
+        for _ in 0..6 {
             s.spawn(|| {
                 for _ in 0..RUNS {
                     let v = random::<i32>();
                     queue.push(v);
                     pushed.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+                    sleep(Duration::from_millis(2));
                 }
                 println!("thread 1 done!");
             });
         }
 
-        for _ in 0..2 {
+        for _ in 0..4 {
             s.spawn(|| {
                 for _ in 0..RUNS {
                     let count = queue.chop().count();
                     chopped.fetch_add(count, std::sync::atomic::Ordering::AcqRel);
+                    sleep(Duration::from_millis(1));
                 }
                 println!("thread 2 done!");
             });

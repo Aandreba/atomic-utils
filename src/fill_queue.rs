@@ -127,6 +127,14 @@ impl<T, A: Allocator + Clone> FillQueue<T, A> {
 
 impl_all! {
     impl FillQueue {
+        const CALCULATED_RAW_LAYOUT: (Layout, usize, usize) = match Self::calculate_layout(0) {
+            Ok(x) => x,
+            Err(_) => unreachable!()
+        };
+        const RAW_LAYOUT: Layout = Self::CALCULATED_RAW_LAYOUT.0;
+        const PREV_OFFSET: usize = Self::CALCULATED_RAW_LAYOUT.1;
+        const NODES_OFFSET: usize = Self::CALCULATED_RAW_LAYOUT.2;
+
         #[inline]
         pub fn block_size (&self) -> usize {
             return self.block_size
@@ -199,7 +207,7 @@ impl_all! {
             //  ^^^
             //  Allocating
 
-            let (idx, nodes): (isize, *mut [Node<T>]) = loop {
+            let (idx, nodes): (isize, *mut Node<T>) = loop {
                 // Get block for our value
                 let block = self.block.load(Ordering::SeqCst);
 
@@ -255,7 +263,7 @@ impl_all! {
                                     
                                     // Next value must be at index 1 of the block, since 0 is the one we'll use
                                     self.idx.store(1, Ordering::Release);
-                                    break (0, crate::ptr_from_raw_parts_mut::<Block<T>>(ptr.as_ptr().cast(), self.block_size))
+                                    break (0, ptr.as_ptr().add(nodes_offset).cast())
                                 },
                                 
                                 Err(e) => {
@@ -271,16 +279,12 @@ impl_all! {
                     }
                 }
 
-                let block = crate::ptr_from_raw_parts_mut::<Block<T>>(block.cast(), if block.is_null() { 0 } else { self.block_size });
-                break (idx, block.byte_add(nodes_offset).cast())
+                break (idx, unsafe { block.add(Self::NODES_OFFSET).cast() })
             };
 
             // Initialize the appropiate node
             unsafe {
-                /* BUG FOUND BY MIRI. DATA RACE HERE */
-                let block = &mut *block;
-                todo!();
-                let node = block.nodes.get_unchecked(idx as usize);
+                let node = &*nodes.add(idx as usize);
                 (&mut *node.v.get()).write(v);
                 node.init.store(TRUE, Ordering::Release);
             }
@@ -288,9 +292,9 @@ impl_all! {
             Ok(())
         }
 
-        fn calculate_layout (len: usize) -> Result<(Layout, usize, usize), LayoutError> {
+        const fn calculate_layout (len: usize) -> Result<(Layout, usize, usize), LayoutError> {
             #[inline]
-            fn add_field (parent: Layout, field: Layout) -> Result<(Layout, usize), LayoutError> {
+            const fn add_field (parent: Layout, field: Layout) -> Result<(Layout, usize), LayoutError> {
                 #[cfg(feature = "nightly")]
                 let padding = parent.padding_needed_for(field.align());
                 #[cfg(not(feature = "nightly"))]
@@ -322,12 +326,58 @@ impl_all! {
                 };
 
                 let offset = parent.size() + padding;
-                return Ok((Layout::from_size_align(offset + field.size(), usize::max(parent.align(), field.align()))?, offset))
+                #[allow(deprecated)]
+                let layout = r#try! {
+                    Layout::from_size_align(offset + field.size(), match parent.align() <= field.align() {
+                        true => field.align(),
+                        false => parent.align(),
+                    })
+                };
+                return Ok((layout, offset))
             }
 
             let result = Layout::new::<InnerFlag>();
-            let (result, prev) = add_field(result, Layout::new::<*mut Block<T>>())?;
-            let (result, nodes) = add_field(result, Layout::array::<Node<T>>(len)?)?;
+
+            #[allow(deprecated)]
+            let (result, prev) = r#try! { add_field(result, Layout::new::<*mut Block<T>>()) };
+
+            #[allow(deprecated)]
+            #[cfg(not(feature = "nightly"))]
+            let (result, nodes) = r#try! { 
+                add_field(result, r#try! {{
+                    #[inline]
+                    const fn inner(
+                        element_size: usize,
+                        align: usize,
+                        n: usize,
+                    ) -> Result<Layout, LayoutError> {
+                        // We need to check two things about the size:
+                        //  - That the total size won't overflow a `usize`, and
+                        //  - That the total size still fits in an `isize`.
+                        // By using division we can check them both with a single threshold.
+                        // That'd usually be a bad idea, but thankfully here the element size
+                        // and alignment are constants, so the compiler will fold all of it.
+                        if element_size != 0 && n > { isize::MAX as usize - (align - 1) } / element_size {
+                            return Err(LayoutError);
+                        }
+
+                        let array_size = element_size * n;
+
+                        // SAFETY: We just checked above that the `array_size` will not
+                        // exceed `isize::MAX` even when rounded up to the alignment.
+                        // And `Alignment` guarantees it's a power of two.
+                        unsafe { Ok(Layout::from_size_align_unchecked(array_size, align.as_usize())) }
+                    }
+
+                    // Reduce the amount of code we need to monomorphize per `T`.
+                    inner(core::mem::size_of::<T>(), core::mem::align_of::<T>(), len)
+                }})
+            };
+
+            #[allow(deprecated)]
+            #[cfg(feature = "nightly")]
+            let (result, nodes) = r#try! { add_field(result, r#try! { Layout::array::<Node<T>>(len) }) };
+
             return Ok((result, prev, nodes))
         }
 
