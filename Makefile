@@ -10,7 +10,7 @@ check:
 	cargo check --features const
 
 miri:
-	RUST_BACKTRACE=1 MIRIFLAGS="-Zmiri-backtrace=full -Zmiri-disable-isolation" cargo miri test --test queue
+	RUST_BACKTRACE=1 MIRIFLAGS="-Zmiri-backtrace=full -Zmiri-disable-isolation" cargo miri test --test queue --all-features
 
 test:
 	cargo test --no-default-features

@@ -1,7 +1,10 @@
+#![feature(allocator_api)]
+
 use std::{thread::{available_parallelism, sleep}, num::NonZeroUsize};
 use std::sync::atomic::{AtomicUsize, Ordering, AtomicBool};
 use utils_atomics::*;
 use rand::random;
+mod debug_alloc;
 
 const RUNS: usize = 20;
 
@@ -31,16 +34,18 @@ note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose bac
 test stress_fill_queue ... FAILED
 */
 
-#[cfg(feature = "alloc")]
+#[cfg(feature = "alloc_api")]
 #[test]
 fn stress_fill_queue () {
-    let queue: FillQueue<i32> = FillQueue::new();
+    let alloc = debug_alloc::DebugAlloc::new(std::alloc::Global, std::fs::File::create("alloc.txt").unwrap());
+    let queue: FillQueue<i32, _> = FillQueue::new_in(&alloc);
+
     let mut pushed = AtomicUsize::new(0);
     let mut chopped = AtomicUsize::new(0);
     println!("initialized");
 
     std::thread::scope(|s| {
-        for _ in 1..(available_parallelism().unwrap().get() / 2) {
+        for _ in 0..3 {
             s.spawn(|| {
                 for _ in 0..RUNS {
                     let v = random::<i32>();
@@ -49,7 +54,9 @@ fn stress_fill_queue () {
                 }
                 println!("thread 1 done!");
             });
+        }
 
+        for _ in 0..2 {
             s.spawn(|| {
                 for _ in 0..RUNS {
                     let count = queue.chop().count();
@@ -66,16 +73,28 @@ fn stress_fill_queue () {
     queue.push(1);
 }
 
+/* REPRODUCABLE BUG (AT LEAST IN M1) */
+#[cfg(feature = "alloc_api")]
 #[test]
 fn singlethread_queue () {
-    let queue = FillQueue::new_with_block_size(NonZeroUsize::new(2).unwrap());
-    queue.push(1);
-    queue.push(2);
-    queue.push(3);
+    let alloc = debug_alloc::DebugAlloc::new(std::alloc::Global, std::fs::File::create("alloc.txt").unwrap());
+    let queue = FillQueue::<_, _>::new_with_block_size_in(NonZeroUsize::new(2).unwrap(), &alloc);
+
+    for i in 0..RUNS {
+        queue.push(i);
+    }
+
+    let chop = queue.chop();
+    for i in chop {
+        println!("{i}");
+    }
+
+    for i in 0..RUNS {
+        queue.push(i);
+    }
 
     let mut chop = queue.chop();
-    assert_eq!(chop.next(), Some(3));
-    assert_eq!(chop.next(), Some(2));
-    assert_eq!(chop.next(), Some(1));
-    assert_eq!(chop.next(), None);
+    for i in chop {
+        println!("{i}");
+    }
 }

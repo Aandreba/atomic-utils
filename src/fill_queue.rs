@@ -1,7 +1,8 @@
-use core::{sync::atomic::{AtomicPtr, Ordering, AtomicIsize}, ptr::NonNull, alloc::{Layout, LayoutError}, mem::MaybeUninit, num::NonZeroUsize, marker::PhantomData, cell::UnsafeCell, ops::Range};
+use core::{sync::atomic::{AtomicPtr, Ordering, AtomicIsize}, ptr::NonNull, alloc::{Layout, LayoutError}, mem::{MaybeUninit}, num::NonZeroUsize, marker::PhantomData, cell::UnsafeCell, ops::Range};
 use crate::{InnerFlag, FALSE, AllocError, TRUE};
+
 #[cfg(feature = "alloc_api")]
-use {alloc::{alloc::Global}, core::alloc::*};
+use {core::mem::ManuallyDrop, alloc::{alloc::Global}, core::alloc::*};
 
 // SAFETY: eight is not zero
 const DEFAULT_BLOCK_SIZE: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(8) };
@@ -46,7 +47,7 @@ pub struct FillQueue<T, #[cfg(feature = "alloc_api")] A: Allocator = Global> {
     idx: AtomicIsize,
     _phtm: PhantomData<T>,
     #[cfg(feature = "alloc_api")]
-    alloc: A
+    alloc: ManuallyDrop<A>
 }
 
 impl<T> FillQueue<T> {
@@ -72,7 +73,7 @@ impl<T> FillQueue<T> {
             block_size: block_size.get(),
             _phtm: PhantomData,
             #[cfg(feature = "alloc_api")]
-            alloc: Global
+            alloc: ManuallyDrop::new(Global)
         }
     }
 }
@@ -91,12 +92,20 @@ impl<T, A: Allocator + Clone> FillQueue<T, A> {
     /// ```
     #[inline]
     pub const fn new_in (alloc: A) -> Self {
-        Self::new_with_block_size_in(DEFAULT_BLOCK_SIZE)
+        Self::new_with_block_size_in(DEFAULT_BLOCK_SIZE, alloc)
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn new_with_block_size_in (block_size: NonZeroUsize, alloc: A) -> Self {
-        todo!()
+        if block_size.get() >= ALLOCATION_MASK as usize { panic!("attempted to create a queue too big") }
+
+        Self {
+            block: AtomicPtr::new(core::ptr::null_mut()),
+            idx: AtomicIsize::new(0),
+            block_size: block_size.get(),
+            _phtm: PhantomData,
+            alloc: ManuallyDrop::new(alloc)
+        }
     }
 
     /// Returns a reference to this queue's allocator.
@@ -190,7 +199,7 @@ impl_all! {
             //  ^^^
             //  Allocating
 
-            let (idx, block) = loop {
+            let (idx, nodes): (isize, *mut [Node<T>]) = loop {
                 // Get block for our value
                 let block = self.block.load(Ordering::SeqCst);
 
@@ -262,12 +271,15 @@ impl_all! {
                     }
                 }
 
-                break (idx, crate::ptr_from_raw_parts_mut::<Block<T>>(block.cast(), if block.is_null() { 0 } else { self.block_size }))
+                let block = crate::ptr_from_raw_parts_mut::<Block<T>>(block.cast(), if block.is_null() { 0 } else { self.block_size });
+                break (idx, block.byte_add(nodes_offset).cast())
             };
 
             // Initialize the appropiate node
             unsafe {
+                /* BUG FOUND BY MIRI. DATA RACE HERE */
                 let block = &mut *block;
+                todo!();
                 let node = block.nodes.get_unchecked(idx as usize);
                 (&mut *node.v.get()).write(v);
                 node.init.store(TRUE, Ordering::Release);
@@ -455,7 +467,7 @@ impl<T, A: Allocator + Clone> FillQueue<T, A> {
             #[cfg(not(feature = "nightly"))]
             block_size: self.block_size,
             range,
-            alloc: self.alloc.clone()
+            alloc: ManuallyDrop::into_inner(self.alloc.clone())
         }
     }
 
@@ -500,7 +512,7 @@ impl<T, A: Allocator + Clone> FillQueue<T, A> {
             #[cfg(not(feature = "nightly"))]
             block_size: self.block_size,
             range,
-            alloc: self.alloc.clone()
+            alloc: ManuallyDrop::into_inner(self.alloc.clone())
         }
     }
 }
@@ -572,8 +584,8 @@ impl<T> FillQueue<T> {
         let self_idx = self.idx.get_mut();
 
         let ptr = core::mem::replace(self_block, core::ptr::null_mut());
-        let len = if ptr.is_null() { 0 } else { self.block_size };
         let limit = core::mem::replace(self_idx, 0);
+        let len = if ptr.is_null() { 0 } else { self.block_size };
         let range;
 
         // New block is being allocated, which means this one is full 
@@ -606,10 +618,38 @@ cfg_if::cfg_if! {
     }
 }
 
-impl<T> Drop for FillQueue<T> {
-    #[inline]
-    fn drop(&mut self) {
-        let _ = self.chop_mut();
+impl_all! {
+    impl @Drop => FillQueue {
+        #[inline]
+        fn drop(&mut self) {
+            let self_block = self.block.get_mut();
+            let self_idx = self.idx.get_mut();
+
+            let ptr = core::mem::replace(self_block, core::ptr::null_mut());
+            let limit = core::mem::replace(self_idx, 0);
+            let len = if ptr.is_null() { 0 } else { self.block_size };
+            let range;
+
+            // New block is being allocated, which means this one is full 
+            if limit.is_negative() {
+                range = 0..len
+            } else {
+                range = 0..(limit as usize)
+            }
+
+            #[cfg(feature = "alloc_api")]
+            let _chop: ChopIter<T, A>;
+            #[cfg(not(feature = "alloc_api"))]
+            let _chop: ChopIter<T>;
+            _chop = ChopIter {
+                ptr: NonNull::new(crate::ptr_from_raw_parts_mut(ptr.cast(), len)),
+                #[cfg(not(feature = "nightly"))]
+                block_size: self.block_size,
+                range,
+                #[cfg(feature = "alloc_api")]
+                alloc: unsafe { ManuallyDrop::take(&mut self.alloc) }
+            };
+        }
     }
 }
 
@@ -677,7 +717,7 @@ impl_all! {
 }
 
 #[cfg(feature = "alloc_api")]
-impl<T, A: core::fmt::Debug + Allocator> Debug for FillQueue<T, A> {
+impl<T, A: core::fmt::Debug + Allocator> core::fmt::Debug for FillQueue<T, A> {
     #[inline]
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         f.debug_struct("FillQueue").field("alloc", &self.alloc).finish_non_exhaustive()

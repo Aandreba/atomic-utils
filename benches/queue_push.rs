@@ -28,8 +28,6 @@ fn benchmark_queue_push(c: &mut Criterion) {
             })
         });
     }
-
-    
 }
 
 #[inline]
