@@ -8,7 +8,7 @@ fn stress_flag () {
     static STARTED : AtomicUsize = AtomicUsize::new(0);
     static ENDED : AtomicUsize = AtomicUsize::new(0);
 
-    let (flag, sub) = flag::spsc::flag();
+    let (flag, sub) = flag::mpsc::flag();
     let handle = std::thread::spawn(move || {
         STARTED.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         sub.wait();
@@ -30,7 +30,7 @@ async fn stress_async_flag () {
     static STARTED : AtomicUsize = AtomicUsize::new(0);
     static ENDED : AtomicUsize = AtomicUsize::new(0);
 
-    let (flag, sub) = utils_atomics::flag::spsc::async_flag();
+    let (flag, sub) = utils_atomics::flag::mpsc::async_flag();
     let handle = tokio::spawn(async move {
         STARTED.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         sub.await;
