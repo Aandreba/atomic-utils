@@ -17,7 +17,7 @@ pub fn flag () -> (Flag, Subscribe) {
 
 /// A flag type that completes when marked or dropped
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Flag {
     #[allow(unused)]
     inner: Arc<FlagWaker>
@@ -123,7 +123,7 @@ cfg_if::cfg_if! {
 
         /// Async flag that completes when marked or droped.
         #[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "futures"))))]
-        #[derive(Debug)]
+        #[derive(Debug, Clone)]
         pub struct AsyncFlag {
             inner: Arc<AsyncFlagWaker>
         }
@@ -148,7 +148,7 @@ cfg_if::cfg_if! {
 
         #[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "futures"))))]
         /// Subscriber of an [`AsyncFlag`]
-        #[derive(Debug, Clone)]
+        #[derive(Debug)]
         pub struct AsyncSubscribe {
             inner: Option<Weak<AsyncFlagWaker>>
         }
