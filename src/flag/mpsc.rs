@@ -49,6 +49,12 @@ impl Flag {
 }
 
 impl Subscribe {
+    /// Returns `true` if the flag has been marked, and `false` otherwise
+    #[inline]
+    pub fn is_marked (&self) -> bool {
+        return self.inner.weak_count() == 0
+    }
+
     // Blocks the current thread until the flag gets marked.
     #[inline]
     pub fn wait (self) {
@@ -151,6 +157,14 @@ cfg_if::cfg_if! {
         #[derive(Debug)]
         pub struct AsyncSubscribe {
             inner: Option<Weak<AsyncFlagWaker>>
+        }
+
+        impl AsyncSubscribe {
+            /// Returns `true` if the flag has been marked, and `false` otherwise
+            #[inline]
+            pub fn is_marked (&self) -> bool {
+                return !self.inner.is_some_and(|x| x.weak_count() > 0)
+            }
         }
 
         impl Future for AsyncSubscribe {
