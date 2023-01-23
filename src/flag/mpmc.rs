@@ -45,7 +45,7 @@ impl Subscribe {
     /// Returns `true` if the flag has been marked, and `false` otherwise
     #[inline]
     pub fn is_marked (&self) -> bool {
-        return self.inner.weak_count() == 0
+        return self.inner.strong_count() == 0
     }
 
     // Blocks the current thread until the flag gets marked.
@@ -163,7 +163,7 @@ cfg_if::cfg_if! {
             /// Returns `true` if the flag has been marked, and `false` otherwise
             #[inline]
             pub fn is_marked (&self) -> bool {
-                return !self.inner.is_some_and(|x| x.weak_count() > 0)
+                return !self.inner.is_some_and(|x| x.strong_count() > 0)
             }
         }
 
