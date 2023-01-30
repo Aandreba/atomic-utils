@@ -163,7 +163,7 @@ cfg_if::cfg_if! {
             /// Returns `true` if the flag has been marked, and `false` otherwise
             #[inline]
             pub fn is_marked (&self) -> bool {
-                return !self.inner.is_some_and(|x| x.strong_count() > 0)
+                return !crate::is_some_and(self.inner, |x| x.strong_count() > 0)
             }
         }
 

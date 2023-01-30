@@ -93,3 +93,12 @@ cfg_if::cfg_if! {
         const FALSE : usize = 0;
     }
 }
+
+#[allow(unused)]
+#[inline]
+pub(crate) fn is_some_and<T, F: FnOnce(T) -> bool> (v: Option<T>, f: F) -> bool {
+    match v {
+        None => false,
+        Some(x) => f(x),
+    }
+}
