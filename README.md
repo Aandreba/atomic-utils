@@ -1,3 +1,7 @@
+[![Crates.io](https://img.shields.io/crates/v/utils_atomics)](https://crates.io/crates/utils_atomics)
+[![docs.rs](https://img.shields.io/docsrs/utils_atomics)](https://docs.rs/utils_atomics/latest)
+[![GitHub](https://img.shields.io/github/license/Aandreba/atomic-utils)](https://github.com/Aandreba/atomic-utils)
+
 # Atomic Utils
 Simple crate with various miscelaneous atomic-related utils
 
