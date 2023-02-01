@@ -53,6 +53,7 @@ impl Subscribe {
         if let Some(queue) = self.inner.upgrade() {
             let (waker, sub) = lock();
             queue.0.push(waker);
+            drop(queue);
             sub.wait()
         }
     }

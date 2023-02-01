@@ -227,11 +227,7 @@ impl_int! {
     "32": (u32, i32) => (core::sync::atomic::AtomicU32, core::sync::atomic::AtomicI32),
     "64": (u64, i64) => (core::sync::atomic::AtomicU64, core::sync::atomic::AtomicI64),
     "ptr": (usize, isize) => (core::sync::atomic::AtomicUsize, core::sync::atomic::AtomicIsize)
-}
-
-#[cfg(has_u128)]
-impl_int! {
-    "128": (u128, i128) => (core::sync::atomic::AtomicU128, core::sync::atomic::AtomicI128)
+    //"128": (u128, i128) => (core::sync::atomic::AtomicU128, core::sync::atomic::AtomicI128)
 }
 
 impl_atomic! {

@@ -1,13 +1,15 @@
 use core::{cell::UnsafeCell, mem::{MaybeUninit, needs_drop}, sync::atomic::Ordering};
 use crate::{InnerAtomicFlag, FALSE, TRUE};
 
-/// Inverse of a `OnceCell`.
+/// Inverse of a `OnceCell`. It initializes with a value, which then can be raced by other threads to take.
+/// Once the value is taken, it can never be taken again.
 pub struct TakeCell<T> {
     taken: InnerAtomicFlag,
     v: UnsafeCell<MaybeUninit<T>>
 }
 
 impl<T> TakeCell<T> {
+    /// Creates a new [`TakeCell`]
     #[inline(always)]
     pub const fn new (v: T) -> Self {
         Self {
@@ -16,6 +18,7 @@ impl<T> TakeCell<T> {
         }
     }
 
+    /// Creates a [`TakeCell`] that has already been taken
     #[inline(always)]
     pub const fn new_taken () -> Self {
         Self {
@@ -24,11 +27,13 @@ impl<T> TakeCell<T> {
         }
     }
 
+    /// Checks if the cell has alredy been taken
     #[inline(always)]
     pub fn is_taken (&self) -> bool {
         self.taken.load(Ordering::Relaxed) == TRUE
     }
 
+    /// Attempts to take the value from the cell, returning `None` if the value has already been taken
     #[inline]
     pub fn try_take (&self) -> Option<T> {
         if self.taken.compare_exchange(FALSE, TRUE, Ordering::AcqRel, Ordering::Acquire).is_ok() {
@@ -36,11 +41,15 @@ impl<T> TakeCell<T> {
                 let v = &*self.v.get();
                 return Some(v.assume_init_read())
             }
-        }   
-        
+        }
         None
     }
 
+    /// Attempts to take the value from the cell through non-atomic operations, returning `None` if the value has already been taken
+    ///
+    /// # Safety
+    /// This method is safe because the mutable reference indicates we are the only thread with access to the cell,
+    /// so atomic operations aren't required. 
     #[inline]
     pub fn try_take_mut (&mut self) -> Option<T> {
         let taken = self.taken.get_mut();
@@ -51,7 +60,6 @@ impl<T> TakeCell<T> {
                 return Some(self.v.get_mut().assume_init_read())
             }
         }
-
         None
     }
 }
