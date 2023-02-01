@@ -1,9 +1,9 @@
 use core::{cell::UnsafeCell, mem::{MaybeUninit, needs_drop}, sync::atomic::Ordering};
-use crate::{InnerFlag, FALSE, TRUE};
+use crate::{InnerAtomicFlag, FALSE, TRUE};
 
 /// Inverse of a `OnceCell`.
 pub struct TakeCell<T> {
-    taken: InnerFlag,
+    taken: InnerAtomicFlag,
     v: UnsafeCell<MaybeUninit<T>>
 }
 
@@ -11,7 +11,7 @@ impl<T> TakeCell<T> {
     #[inline(always)]
     pub const fn new (v: T) -> Self {
         Self {
-            taken: InnerFlag::new(FALSE),
+            taken: InnerAtomicFlag::new(FALSE),
             v: UnsafeCell::new(MaybeUninit::new(v))
         }
     }
@@ -19,7 +19,7 @@ impl<T> TakeCell<T> {
     #[inline(always)]
     pub const fn new_taken () -> Self {
         Self {
-            taken: InnerFlag::new(TRUE),
+            taken: InnerAtomicFlag::new(TRUE),
             v: UnsafeCell::new(MaybeUninit::uninit())
         }
     }

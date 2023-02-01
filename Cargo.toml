@@ -26,6 +26,8 @@ num-traits = { version = "0.2.15", default-features = false }
 once_cell = { version = "1.14.0", default-features = false }
 futures = { version = "0.3.24", default-features = false, optional = true }
 docfg = "0.1.0"
+static_assertions = "1.1.0"
+pin-project-lite = "0.2.9"
 
 [dev-dependencies]
 criterion = "0.4.0"

@@ -1,6 +1,6 @@
 use core::{sync::atomic::{AtomicPtr, Ordering}, ptr::NonNull, iter::FusedIterator, alloc::Layout};
 
-use crate::{InnerFlag, FALSE, TRUE, AllocError};
+use crate::{InnerAtomicFlag, FALSE, TRUE, AllocError};
 use core::fmt::Debug;
 #[cfg(feature = "alloc_api")]
 use {alloc::{alloc::Global}, core::alloc::*};
@@ -24,11 +24,12 @@ macro_rules! impl_all {
 }
 
 struct FillQueueNode<T> {
-    init: InnerFlag,
+    init: InnerAtomicFlag,
     prev: *mut Self,
     v: T
 }
 
+/// An atomic queue intended for use cases where taking the full contents of the queue is needed.
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub struct FillQueue<T, #[cfg(feature = "alloc_api")] A: Allocator = Global> {
     head: AtomicPtr<FillQueueNode<T>>,
@@ -156,7 +157,7 @@ impl_all! {
         /// ```
         pub fn try_push (&self, v: T) -> Result<(), AllocError> {
             let node = FillQueueNode {
-                init: InnerFlag::new(FALSE),
+                init: InnerAtomicFlag::new(FALSE),
                 prev: core::ptr::null_mut(),
                 v
             };
@@ -205,7 +206,7 @@ impl_all! {
         /// ```
         pub fn try_push_mut (&mut self, v: T) -> Result<(), AllocError> {
             let node = FillQueueNode {
-                init: InnerFlag::new(TRUE),
+                init: InnerAtomicFlag::new(TRUE),
                 prev: core::ptr::null_mut(),
                 v
             };

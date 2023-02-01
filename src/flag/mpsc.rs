@@ -1,10 +1,9 @@
 use core::{cell::UnsafeCell, fmt::Debug};
 use alloc::sync::{Arc, Weak};
-use crate::{FillQueue};
-use super::{Lock, lock_new, lock_wake};
+use crate::{locks::{Lock, lock}};
 
-#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 /// Creates a new pair of [`Flag`] and [`Subscribe`]
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub fn flag () -> (Flag, Subscribe) {
     let waker = FlagWaker {
         waker: UnsafeCell::new(None)
@@ -15,7 +14,7 @@ pub fn flag () -> (Flag, Subscribe) {
     (Flag { inner: flag }, Subscribe { inner: sub })
 }
 
-/// A flag type that completes when marked or dropped
+/// A flag type that completes when all it's references are marked or dropped
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 #[derive(Debug, Clone)]
 pub struct Flag {
@@ -23,8 +22,8 @@ pub struct Flag {
     inner: Arc<FlagWaker>
 }
 
-#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 /// Subscriber of a [`Flag`]
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 #[derive(Debug)]
 pub struct Subscribe {
     inner: Weak<FlagWaker>
@@ -33,70 +32,42 @@ pub struct Subscribe {
 impl Flag {
     /// See [`Arc::into_raw`]
     #[inline(always)]
-    pub unsafe fn into_raw (self) -> *const FillQueue<Lock> {
+    pub unsafe fn into_raw (self) -> *const () {
         Arc::into_raw(self.inner).cast()
     }
 
     /// See [`Arc::from_raw`]
     #[inline(always)]
-    pub unsafe fn from_raw (ptr: *const FillQueue<Lock>) -> Self {
+    pub unsafe fn from_raw (ptr: *const ()) -> Self {
         Self { inner: Arc::from_raw(ptr.cast()) }
     }
 
-    /// Mark this flag as completed, consuming it
+    /// Mark this flag reference as completed, consuming it
     #[inline(always)]
     pub fn mark (self) {}
 }
 
 impl Subscribe {
-    /// Returns `true` if the flag has been marked, and `false` otherwise
+    /// Returns `true` if the flag has been fully marked, and `false` otherwise
     #[inline]
     pub fn is_marked (&self) -> bool {
         return self.inner.strong_count() == 0
     }
 
-    // Blocks the current thread until the flag gets marked.
+    // Blocks the current thread until the flag gets fully marked.
     #[inline]
     pub fn wait (self) {
         if let Some(queue) = self.inner.upgrade() {
-            #[allow(unused_mut)]
-            let mut waker = lock_new();
-
-            // SAFETY: If we upgraded, we are the only thread with access to the value,
-            //         since the only other owner of the waker is it's destructor. 
-            #[cfg(feature = "std")] {
-                unsafe { queue.waker.get().write(Some(waker)) };
-                drop(queue);
-                std::thread::park();
-            }
-
-            // SAFETY: If we upgraded, we are the only thread with access to the value,
-            //         since the only other owner of the waker is it's destructor. 
-            #[cfg(not(feature = "std"))] {
-                unsafe { queue.waker.get().write(Some(waker.clone())) };
-                drop(queue);
-                loop {
-                    match Arc::try_unwrap(waker) {
-                        Ok(_) => break,
-                        Err(e) => waker = e
-                    }
-                }
-            }
+            let (lock, sub) = lock();
+            unsafe { *queue.waker.get() = Some(lock) }
+            drop(queue);
+            sub.wait();
         }
     }
 }
 
 struct FlagWaker {
     waker: UnsafeCell<Option<Lock>>
-}
-
-impl Drop for FlagWaker {
-    #[inline]
-    fn drop(&mut self) {
-        if let Some(waker) = self.waker.get_mut().take() {
-            lock_wake(waker)
-        }
-    }
 }
 
 impl Debug for FlagWaker {
@@ -106,8 +77,8 @@ impl Debug for FlagWaker {
     }
 }
 
-unsafe impl Send for FlagWaker {}
-unsafe impl Sync for FlagWaker {}
+unsafe impl Send for FlagWaker where Lock: Send {}
+unsafe impl Sync for FlagWaker where Lock: Sync {}
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "futures")] {
@@ -127,7 +98,7 @@ cfg_if::cfg_if! {
             (AsyncFlag { inner: flag }, AsyncSubscribe { inner: Some(sub) })
         }
 
-        /// Async flag that completes when marked or droped.
+        /// Async flag that completes when all it's references are marked or droped.
         #[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "futures"))))]
         #[derive(Debug, Clone)]
         pub struct AsyncFlag {

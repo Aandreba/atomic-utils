@@ -1,4 +1,4 @@
-#![cfg_attr(feature = "nightly", feature(int_roundings))]
+#![cfg_attr(feature = "nightly", feature(int_roundings, negative_impls))]
 #![cfg_attr(all(feature = "nightly", feature = "alloc"), feature(new_uninit))]
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(feature = "alloc_api", feature(allocator_api))]
@@ -28,7 +28,6 @@ cfg_if::cfg_if! {
         #[derive(Copy, Clone, PartialEq, Eq, Debug)]
         pub struct AllocError;
 
-        #[cfg(not(bootstrap))]
         #[cfg(feature = "std")]
         impl std::error::Error for AllocError {}
 
@@ -50,6 +49,9 @@ cfg_if::cfg_if! {
         pub mod bitfield;
         #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
         pub mod flag;
+        #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
+        pub mod channel;
+        pub(crate) mod locks;
 
         #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
         pub use fill_queue::FillQueue;
@@ -72,27 +74,25 @@ pub mod prelude {
 
 cfg_if::cfg_if! {
     if #[cfg(target_has_atomic = "8")] {
-        pub(crate) type InnerFlag = core::sync::atomic::AtomicU8;
-        const TRUE : u8 = 1;
-        const FALSE : u8 = 0;
+        pub(crate) type InnerFlag = u8;
+        pub(crate) type InnerAtomicFlag = core::sync::atomic::AtomicU8;
     } else if #[cfg(target_has_atomic = "16")] {
-        pub(crate) type InnerFlag = core::sync::atomic::AtomicU16;
-        const TRUE : u16 = 1;
-        const FALSE : u16 = 0;
+        pub(crate) type InnerFlag = u16;
+        pub(crate) type InnerAtomicFlag = core::sync::atomic::AtomicU16;
     } else if #[cfg(target_has_atomic = "32")] {
-        pub(crate) type InnerFlag = core::sync::atomic::AtomicU32;
-        const TRUE : u32 = 1;
-        const FALSE : u32 = 0;
+        pub(crate) type InnerFlag = u32;
+        pub(crate) type InnerAtomicFlag = core::sync::atomic::AtomicU32;
     } else if #[cfg(target_has_atomic = "64")] {
-        pub(crate) type InnerFlag = core::sync::atomic::AtomicU64;
-        const TRUE : u64 = 1;
-        const FALSE : u64 = 0;
+        pub(crate) type InnerFlag = u64;
+        pub(crate) type InnerAtomicFlag = core::sync::atomic::AtomicU64;
     } else {
-        pub(crate) type InnerFlag = core::sync::atomic::AtomicUsize;
-        const TRUE : usize = 1;
-        const FALSE : usize = 0;
+        pub(crate) type InnerFlag = usize;
+        pub(crate) type InnerAtomicFlag = core::sync::atomic::AtomicUsize;
     }
 }
+
+pub(crate) const TRUE : InnerFlag = 1;
+pub(crate) const FALSE : InnerFlag = 0;
 
 #[allow(unused)]
 #[inline]

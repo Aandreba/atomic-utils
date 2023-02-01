@@ -3,14 +3,14 @@ use alloc::{boxed::Box};
 use bytemuck::Zeroable;
 use num_traits::{One, Zero, Num, WrappingSub};
 use crate::{traits::{AtomicInt}, AllocError};
-use crate::InnerFlag;
+use crate::InnerAtomicFlag;
 #[cfg(feature = "alloc_api")]
 use {alloc::alloc::Global, core::alloc::*};
 
 /// Bitfield used with atomic operations
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 #[repr(transparent)]
-pub struct AtomicBitBox<T: AtomicInt = InnerFlag, #[cfg(feature = "alloc_api")] A: Allocator = Global> {
+pub struct AtomicBitBox<T: AtomicInt = InnerAtomicFlag, #[cfg(feature = "alloc_api")] A: Allocator = Global> {
     #[cfg(feature = "alloc_api")]
     bits: Box<[T], A>,
     #[cfg(not(feature = "alloc_api"))]

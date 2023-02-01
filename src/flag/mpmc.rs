@@ -1,6 +1,5 @@
 use alloc::sync::{Arc, Weak};
-use crate::{FillQueue};
-use super::{Lock, lock_new};
+use crate::{FillQueue, locks::{Lock, lock}};
 
 /// A flag type that will be completed when all references to [`Flag`] have been dropped or marked.
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
@@ -52,26 +51,9 @@ impl Subscribe {
     #[inline]
     pub fn wait (&self) {
         if let Some(queue) = self.inner.upgrade() {
-            #[allow(unused_mut)]
-            let mut waker = lock_new();
-
-            #[cfg(feature = "std")] {
-                queue.0.push(waker);
-                drop(queue);
-                std::thread::park();
-            }
-    
-            #[cfg(not(feature = "std"))] {
-                queue.0.push(waker.clone());
-                drop(queue);
-                loop {
-                    match Arc::try_unwrap(waker) {
-                        Ok(_) => break,
-                        Err(e) => waker = e
-                    }
-                    // core::hint::spin_loop();
-                }
-            }
+            let (waker, sub) = lock();
+            queue.0.push(waker);
+            sub.wait()
         }
     }
 }
@@ -93,7 +75,7 @@ struct FlagQueue (pub FillQueue<Lock>);
 impl Drop for FlagQueue {
     #[inline(always)]
     fn drop(&mut self) {
-        self.0.chop_mut().for_each(super::lock_wake);
+        self.0.chop_mut().for_each(Lock::wake);
     }
 }
 
