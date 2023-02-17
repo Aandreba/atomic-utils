@@ -14,7 +14,10 @@ pub fn flag () -> (Flag, Subscribe) {
     (Flag { inner: flag }, Subscribe { inner: sub })
 }
 
-/// A flag type that completes when all it's references are marked or dropped
+/// A flag type that completes when all it's references are marked or dropped.
+/// 
+/// This flag drops loudly by default (a.k.a will complete when dropped),
+/// but can be droped silently with [`silent_drop`](Flag::silent_drop)
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 #[derive(Debug, Clone)]
 pub struct Flag {
@@ -45,6 +48,17 @@ impl Flag {
     /// Mark this flag reference as completed, consuming it
     #[inline(always)]
     pub fn mark (self) {}
+
+    /// Drops the flag without marking it as completed.
+    /// This method may leak memory.
+    #[inline]
+    pub fn silent_drop (self) {
+        if let Ok(inner) = Arc::try_unwrap(self.inner) {
+            if let Some(inner) = inner.waker.into_inner() {
+                inner.silent_drop();
+            }
+        }
+    }
 }
 
 impl Subscribe {
@@ -99,6 +113,9 @@ cfg_if::cfg_if! {
         }
 
         /// Async flag that completes when all it's references are marked or droped.
+        /// 
+        /// This flag drops loudly by default (a.k.a will complete when dropped),
+        /// but can be droped silently with [`silent_drop`](Flag::silent_drop)
         #[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "futures"))))]
         #[derive(Debug, Clone)]
         pub struct AsyncFlag {
@@ -121,6 +138,15 @@ cfg_if::cfg_if! {
             /// Marks this flag as complete, consuming it
             #[inline(always)]
             pub fn mark (self) {}
+
+            /// Drops the flag without marking it as completed.
+            /// This method may leak memory.
+            #[inline]
+            pub fn silent_drop (self) {
+                if let Ok(inner) = Arc::try_unwrap(self.inner) {
+                    inner.silent_drop();
+                }
+            }
         }
 
         #[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "futures"))))]
@@ -168,6 +194,14 @@ cfg_if::cfg_if! {
         struct AsyncFlagWaker {
             waker: UnsafeCell<Option<Waker>>
         }
+
+        impl AsyncFlagWaker {
+            #[inline]
+            pub fn silent_drop (self) {
+                let mut this = core::mem::ManuallyDrop::new(self);
+                unsafe { core::ptr::drop_in_place(&mut this.waker) }
+            }
+        }
         
         impl Drop for AsyncFlagWaker {
             #[inline]
@@ -185,7 +219,7 @@ cfg_if::cfg_if! {
             }
         }
         
-        unsafe impl Send for AsyncFlagWaker {}
-        unsafe impl Sync for AsyncFlagWaker {}
+        unsafe impl Send for AsyncFlagWaker where Option<Waker>: Send {}
+        unsafe impl Sync for AsyncFlagWaker where Option<Waker>: Sync {}
     }
 }

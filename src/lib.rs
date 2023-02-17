@@ -51,6 +51,8 @@ cfg_if::cfg_if! {
         pub mod flag;
         #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
         pub mod channel;
+        #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
+        pub mod notify;
         pub(crate) mod locks;
 
         #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]

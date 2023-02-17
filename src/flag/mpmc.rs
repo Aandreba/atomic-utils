@@ -1,7 +1,12 @@
+use core::mem::ManuallyDrop;
+
 use alloc::sync::{Arc, Weak};
 use crate::{FillQueue, locks::{Lock, lock}};
 
-/// A flag type that will be completed when all references to [`Flag`] have been dropped or marked.
+/// A flag type that will be completed when all its references have been dropped or marked.
+/// 
+/// This flag drops loudly by default (a.k.a will complete when dropped),
+/// but can be droped silently with [`silent_drop`](Flag::silent_drop)
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 #[derive(Debug, Clone)]
 pub struct Flag {
@@ -31,6 +36,15 @@ impl Flag {
     /// Mark this flag as completed, consuming it
     #[inline(always)]
     pub fn mark (self) {}
+
+    /// Drops the flag without marking it as completed.
+    /// This method may leak memory.
+    #[inline]
+    pub fn silent_drop (self) {
+        if let Ok(inner) = Arc::try_unwrap(self._inner) {
+            inner.silent_drop()
+        }
+    }
 }
 
 impl Subscribe {
@@ -72,6 +86,15 @@ pub fn flag () -> (Flag, Subscribe) {
 #[repr(transparent)]
 #[derive(Debug)]
 struct FlagQueue (pub FillQueue<Lock>);
+
+impl FlagQueue {
+    #[inline]
+    pub fn silent_drop (self) {
+        let mut this = ManuallyDrop::new(self);
+        this.0.chop_mut().for_each(Lock::silent_drop);
+        unsafe { core::ptr::drop_in_place(&mut this) };
+    }
+}
 
 impl Drop for FlagQueue {
     #[inline(always)]
@@ -133,6 +156,15 @@ cfg_if::cfg_if! {
                     inner: Some(Arc::downgrade(&self.inner))
                 }
             }
+
+            /// Drops the flag without marking it as completed.
+            /// This method may leak memory.
+            #[inline]
+            pub fn silent_drop (self) {
+                if let Ok(inner) = Arc::try_unwrap(self.inner) {
+                    inner.silent_drop()
+                }
+            }
         }
 
         #[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "futures"))))]
@@ -143,6 +175,12 @@ cfg_if::cfg_if! {
         }
 
         impl AsyncSubscribe {
+            /// Creates a new subscriber that has already completed
+            #[inline]
+            pub fn marked () -> AsyncSubscribe {
+                return Self { inner: None }
+            }
+
             /// Returns `true` if the flag has been marked, and `false` otherwise
             #[inline]
             pub fn is_marked (&self) -> bool {
@@ -179,6 +217,15 @@ cfg_if::cfg_if! {
         #[repr(transparent)]
         #[derive(Debug)]
         struct AsyncFlagQueue (pub FillQueue<Waker>);
+
+        impl AsyncFlagQueue {
+            #[inline]
+            pub fn silent_drop (self) {
+                let mut this = ManuallyDrop::new(self);
+                let _ = this.0.chop_mut();
+                unsafe { core::ptr::drop_in_place(&mut this.0) }
+            }
+        }
 
         impl Drop for AsyncFlagQueue {
             #[inline(always)]

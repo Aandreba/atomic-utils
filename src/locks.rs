@@ -1,7 +1,7 @@
 #[cfg(not(feature = "nightly"))]
 use core::marker::PhantomData;
 use core::{
-    fmt::Debug,
+    fmt::Debug, mem::ManuallyDrop,
 };
 
 cfg_if::cfg_if! {
@@ -24,6 +24,12 @@ cfg_if::cfg_if! {
             pub unsafe fn from_raw (raw: *mut ()) -> Self {
                 static_assertions::assert_eq_align!(Lock, *mut ());
                 return Self(core::mem::transmute(raw))
+            }
+
+            #[inline]
+            pub fn silent_drop (self) {
+                let mut this = ManuallyDrop::new(self);
+                unsafe { core::ptr::drop_in_place(&mut this.0) }
             }
         }
 
@@ -63,6 +69,11 @@ cfg_if::cfg_if! {
             pub unsafe fn from_raw (raw: *mut ()) -> Self {
                 return Self(Arc::from_raw(raw.cast_const()))
             }
+
+            #[inline]
+            pub fn silent_drop (self) {
+                core::mem::forget(ManuallyDrop::new(self));
+            }
         }
 
         impl LockSub {
@@ -71,7 +82,7 @@ cfg_if::cfg_if! {
                 let mut this = self;
                 loop {
                     match alloc::sync::Arc::try_unwrap(this) {
-                        Ok(_) => {},
+                        Ok(_) => return,
                         Err(e) => this = e
                     }
                     core::hint::spin_loop()
