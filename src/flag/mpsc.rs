@@ -1,12 +1,12 @@
-use core::{cell::UnsafeCell, fmt::Debug};
+use crate::locks::{lock, Lock};
 use alloc::sync::{Arc, Weak};
-use crate::{locks::{Lock, lock}};
+use core::{cell::UnsafeCell, fmt::Debug};
 
 /// Creates a new pair of [`Flag`] and [`Subscribe`]
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
-pub fn flag () -> (Flag, Subscribe) {
+pub fn flag() -> (Flag, Subscribe) {
     let waker = FlagWaker {
-        waker: UnsafeCell::new(None)
+        waker: UnsafeCell::new(None),
     };
 
     let flag = Arc::new(waker);
@@ -15,44 +15,46 @@ pub fn flag () -> (Flag, Subscribe) {
 }
 
 /// A flag type that completes when all it's references are marked or dropped.
-/// 
+///
 /// This flag drops loudly by default (a.k.a will complete when dropped),
 /// but can be droped silently with [`silent_drop`](Flag::silent_drop)
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 #[derive(Debug, Clone)]
 pub struct Flag {
     #[allow(unused)]
-    inner: Arc<FlagWaker>
+    inner: Arc<FlagWaker>,
 }
 
 /// Subscriber of a [`Flag`]
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 #[derive(Debug)]
 pub struct Subscribe {
-    inner: Weak<FlagWaker>
+    inner: Weak<FlagWaker>,
 }
 
 impl Flag {
     /// See [`Arc::into_raw`]
     #[inline(always)]
-    pub unsafe fn into_raw (self) -> *const () {
+    pub unsafe fn into_raw(self) -> *const () {
         Arc::into_raw(self.inner).cast()
     }
 
     /// See [`Arc::from_raw`]
     #[inline(always)]
-    pub unsafe fn from_raw (ptr: *const ()) -> Self {
-        Self { inner: Arc::from_raw(ptr.cast()) }
+    pub unsafe fn from_raw(ptr: *const ()) -> Self {
+        Self {
+            inner: Arc::from_raw(ptr.cast()),
+        }
     }
 
     /// Mark this flag reference as completed, consuming it
     #[inline(always)]
-    pub fn mark (self) {}
+    pub fn mark(self) {}
 
     /// Drops the flag without marking it as completed.
     /// This method may leak memory.
     #[inline]
-    pub fn silent_drop (self) {
+    pub fn silent_drop(self) {
         if let Ok(inner) = Arc::try_unwrap(self.inner) {
             if let Some(inner) = inner.waker.into_inner() {
                 inner.silent_drop();
@@ -64,13 +66,13 @@ impl Flag {
 impl Subscribe {
     /// Returns `true` if the flag has been fully marked, and `false` otherwise
     #[inline]
-    pub fn is_marked (&self) -> bool {
-        return self.inner.strong_count() == 0
+    pub fn is_marked(&self) -> bool {
+        return self.inner.strong_count() == 0;
     }
 
     // Blocks the current thread until the flag gets fully marked.
     #[inline]
-    pub fn wait (self) {
+    pub fn wait(self) {
         if let Some(queue) = self.inner.upgrade() {
             let (lock, sub) = lock();
             unsafe { *queue.waker.get() = Some(lock) }
@@ -81,7 +83,7 @@ impl Subscribe {
 }
 
 struct FlagWaker {
-    waker: UnsafeCell<Option<Lock>>
+    waker: UnsafeCell<Option<Lock>>,
 }
 
 impl Debug for FlagWaker {
@@ -106,14 +108,14 @@ cfg_if::cfg_if! {
             let waker = AsyncFlagWaker {
                 waker: UnsafeCell::new(None)
             };
-        
+
             let flag = Arc::new(waker);
             let sub = Arc::downgrade(&flag);
             (AsyncFlag { inner: flag }, AsyncSubscribe { inner: Some(sub) })
         }
 
         /// Async flag that completes when all it's references are marked or droped.
-        /// 
+        ///
         /// This flag drops loudly by default (a.k.a will complete when dropped),
         /// but can be droped silently with [`silent_drop`](Flag::silent_drop)
         #[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "futures"))))]
@@ -173,7 +175,7 @@ cfg_if::cfg_if! {
                     if let Some(queue) = queue.upgrade() {
                         // SAFETY: If we upgraded, we are the only thread with access to the value,
                         //         since the only other owner of the waker is it's destructor.
-                        unsafe { queue.waker.get().write(Some(cx.waker().clone())) };
+                        unsafe { *queue.waker.get() = Some(cx.waker().clone()) };
                         return Poll::Pending;
                     } else {
                         self.inner = None;
@@ -202,7 +204,7 @@ cfg_if::cfg_if! {
                 unsafe { core::ptr::drop_in_place(&mut this.waker) }
             }
         }
-        
+
         impl Drop for AsyncFlagWaker {
             #[inline]
             fn drop(&mut self) {
@@ -211,14 +213,14 @@ cfg_if::cfg_if! {
                 }
             }
         }
-        
+
         impl Debug for AsyncFlagWaker {
             #[inline]
             fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                 f.debug_struct("AsyncFlagWaker").finish_non_exhaustive()
             }
         }
-        
+
         unsafe impl Send for AsyncFlagWaker where Option<Waker>: Send {}
         unsafe impl Sync for AsyncFlagWaker where Option<Waker>: Sync {}
     }
