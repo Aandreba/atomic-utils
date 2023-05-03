@@ -23,11 +23,14 @@ pub struct Receiver<T> {
 impl<T> Sender<T> {
     /// Sends the value through the channel.
     #[inline]
-    pub fn send (self, t: T) {
+    pub fn send(self, t: T) {
         let _ = self.try_send(t);
     }
 
     /// Attempts to send the value through the channel, returning `Ok` if successfull, and `Err(t)` otherwise.
+    ///
+    /// # Errors
+    /// This method returns an error if the channel has already been used or closed.
     pub fn try_send(self, t: T) -> Result<(), T> {
         if let Some(inner) = self.inner.upgrade() {
             unsafe { *inner.v.get() = Some(t) };
@@ -74,7 +77,7 @@ cfg_if::cfg_if! {
         }
 
         pin_project_lite::pin_project! {
-            /// An asynchronous channel receiver that can only receive a single value  
+            /// An asynchronous channel receiver that can only receive a single value
             #[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "futures"))))]
             pub struct AsyncReceiver<T> {
                 inner: Arc<Inner<T>>,
@@ -91,6 +94,9 @@ cfg_if::cfg_if! {
             }
 
             /// Attempts to send the value through the channel, returning `Ok` if successfull, and `Err(t)` otherwise.
+            ///
+            /// # Errors
+            /// This method returns an error if the channel has already been used or closed.
             pub fn try_send(self, t: T) -> Result<(), T> {
                 if let Some(inner) = self.inner.upgrade() {
                     unsafe { *inner.v.get() = Some(t) };
@@ -127,7 +133,7 @@ cfg_if::cfg_if! {
                 v: UnsafeCell::new(None),
             });
             let (flag, sub) = crate::flag::mpsc::async_flag();
-        
+
             return (
                 AsyncSender {
                     inner: Arc::downgrade(&inner),

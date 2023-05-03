@@ -1,8 +1,6 @@
 #[cfg(not(feature = "nightly"))]
 use core::marker::PhantomData;
-use core::{
-    fmt::Debug, mem::ManuallyDrop,
-};
+use core::{fmt::Debug, mem::ManuallyDrop};
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "std")] {
@@ -11,7 +9,7 @@ cfg_if::cfg_if! {
         pub struct Lock (std::thread::Thread);
 
         #[derive(Debug)]
-        pub struct LockSub (#[cfg(not(feature = "nightly"))] PhantomData<std::sync::MutexGuard<'static, ()>>);
+        pub struct LockSub (#[cfg(not(feature = "nightly"))] PhantomData<*mut ()>);
 
         impl Lock {
             #[inline]
@@ -34,6 +32,7 @@ cfg_if::cfg_if! {
         }
 
         impl LockSub {
+            #[allow(clippy::unused_self)]
             #[inline]
             pub fn wait (self) {
                 std::thread::park();
@@ -43,7 +42,7 @@ cfg_if::cfg_if! {
         impl Drop for Lock {
             #[inline]
             fn drop (&mut self) {
-                self.0.unpark()
+                self.0.unpark();
             }
         }
 
@@ -52,17 +51,20 @@ cfg_if::cfg_if! {
             return (Lock(std::thread::current()), LockSub(#[cfg(not(feature = "nightly"))] PhantomData))
         }
     } else {
+        use alloc::sync::Arc;
+
         #[derive(Debug)]
         #[repr(transparent)]
         pub struct Lock (alloc::sync::Arc<()>);
 
         #[derive(Debug)]
-        pub struct LockSub (alloc::sync::Arc<()>, #[cfg(not(feature = "nightly"))] PhantomData<std::sync::MutexGuard<'static, ()>>);
+        pub struct LockSub (alloc::sync::Arc<()>, #[cfg(not(feature = "nightly"))] PhantomData<*mut ()>);
 
         impl Lock {
             #[inline]
             pub unsafe fn into_raw (self) -> *mut () {
-                return Arc::into_raw(self.0).cast_mut()
+                let this = ManuallyDrop::new(self);
+                return Arc::into_raw(core::ptr::read(&this.0)).cast_mut()
             }
 
             #[inline]
@@ -72,14 +74,14 @@ cfg_if::cfg_if! {
 
             #[inline]
             pub fn silent_drop (self) {
-                core::mem::forget(ManuallyDrop::new(self));
+                core::mem::forget(self);
             }
         }
 
         impl LockSub {
             #[inline]
             pub fn wait (self) {
-                let mut this = self;
+                let mut this = self.0;
                 loop {
                     match alloc::sync::Arc::try_unwrap(this) {
                         Ok(_) => return,
@@ -104,9 +106,15 @@ cfg_if::cfg_if! {
 }
 
 impl Lock {
+    #[allow(clippy::unused_self)]
     #[inline]
-    pub fn wake (self) {}
+    pub fn wake(self) {}
 }
 
-#[cfg(feature = "nightly")]
-impl !Send for LockSub {}
+cfg_if::cfg_if! {
+    if #[cfg(feature = "nightly")] {
+        impl !Send for LockSub {}
+    } else {
+        unsafe impl Sync for LockSub {}
+    }
+}

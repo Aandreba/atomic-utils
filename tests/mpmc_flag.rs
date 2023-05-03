@@ -1,13 +1,14 @@
+#![cfg(feature = "alloc")]
+
 use std::thread::{available_parallelism, spawn};
 use utils_atomics::*;
 
-#[cfg(feature = "alloc")]
 #[test]
-fn stress_flag () {
+fn stress_flag() {
     use std::sync::atomic::AtomicUsize;
 
-    static STARTED : AtomicUsize = AtomicUsize::new(0);
-    static ENDED : AtomicUsize = AtomicUsize::new(0);
+    static STARTED: AtomicUsize = AtomicUsize::new(0);
+    static ENDED: AtomicUsize = AtomicUsize::new(0);
 
     let (flag, sub) = flag::mpmc::flag();
     let mut handles = Vec::new();
@@ -23,21 +24,25 @@ fn stress_flag () {
 
     //flag.mark();
     drop(flag);
-    handles.into_iter()
+    handles
+        .into_iter()
         .map(std::thread::JoinHandle::join)
         .for_each(Result::unwrap);
 
-    assert_eq!(STARTED.load(std::sync::atomic::Ordering::Acquire), ENDED.load(std::sync::atomic::Ordering::Acquire));
+    assert_eq!(
+        STARTED.load(std::sync::atomic::Ordering::Acquire),
+        ENDED.load(std::sync::atomic::Ordering::Acquire)
+    );
 }
 
 #[cfg(feature = "futures")]
 #[tokio::test]
-async fn stress_async_flag () {
+async fn stress_async_flag() {
     use std::sync::atomic::AtomicUsize;
 
-    const SIZE : usize = 100_000;
-    static STARTED : AtomicUsize = AtomicUsize::new(0);
-    static ENDED : AtomicUsize = AtomicUsize::new(0);
+    const SIZE: usize = 100_000;
+    static STARTED: AtomicUsize = AtomicUsize::new(0);
+    static ENDED: AtomicUsize = AtomicUsize::new(0);
 
     let (flag, _) = utils_atomics::flag::mpmc::async_flag();
     let mut handles = Vec::with_capacity(SIZE);
@@ -53,5 +58,8 @@ async fn stress_async_flag () {
 
     flag.mark();
     let _ = futures::future::join_all(handles).await;
-    assert_eq!(STARTED.load(std::sync::atomic::Ordering::Acquire), ENDED.load(std::sync::atomic::Ordering::Acquire));
+    assert_eq!(
+        STARTED.load(std::sync::atomic::Ordering::Acquire),
+        ENDED.load(std::sync::atomic::Ordering::Acquire)
+    );
 }

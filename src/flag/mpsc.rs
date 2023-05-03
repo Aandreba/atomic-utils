@@ -34,13 +34,13 @@ pub struct Subscribe {
 
 impl Flag {
     /// See [`Arc::into_raw`]
-    #[inline(always)]
+    #[inline]
     pub unsafe fn into_raw(self) -> *const () {
         Arc::into_raw(self.inner).cast()
     }
 
     /// See [`Arc::from_raw`]
-    #[inline(always)]
+    #[inline]
     pub unsafe fn from_raw(ptr: *const ()) -> Self {
         Self {
             inner: Arc::from_raw(ptr.cast()),
@@ -48,7 +48,7 @@ impl Flag {
     }
 
     /// Mark this flag reference as completed, consuming it
-    #[inline(always)]
+    #[inline]
     pub fn mark(self) {}
 
     /// Drops the flag without marking it as completed.
@@ -126,19 +126,19 @@ cfg_if::cfg_if! {
 
         impl AsyncFlag {
             /// See [`Arc::into_raw`]
-            #[inline(always)]
+            #[inline]
             pub unsafe fn into_raw (self) -> *const Option<Waker> {
                 Arc::into_raw(self.inner).cast()
             }
 
             /// See [`Arc::from_raw`]
-            #[inline(always)]
+            #[inline]
             pub unsafe fn from_raw (ptr: *const Option<Waker>) -> Self {
                 Self { inner: Arc::from_raw(ptr.cast()) }
             }
 
             /// Marks this flag as complete, consuming it
-            #[inline(always)]
+            #[inline]
             pub fn mark (self) {}
 
             /// Drops the flag without marking it as completed.
@@ -177,17 +177,17 @@ cfg_if::cfg_if! {
                         //         since the only other owner of the waker is it's destructor.
                         unsafe { *queue.waker.get() = Some(cx.waker().clone()) };
                         return Poll::Pending;
-                    } else {
-                        self.inner = None;
-                        return Poll::Ready(())
                     }
+
+                    self.inner = None;
+                    return Poll::Ready(())
                 }
                 return Poll::Ready(())
             }
         }
 
         impl FusedFuture for AsyncSubscribe {
-            #[inline(always)]
+            #[inline]
             fn is_terminated(&self) -> bool {
                 self.inner.is_none()
             }

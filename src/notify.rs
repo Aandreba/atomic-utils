@@ -5,16 +5,15 @@ use crate::{
 use alloc::sync::{Arc, Weak};
 
 /// Creates a new notifier and a listener to it.
-pub fn notify () -> (Notify, Listener) {
+pub fn notify() -> (Notify, Listener) {
     let inner = Arc::new(Inner {
         wakers: FillQueue::new(),
     });
 
-    let listener = Listener { inner: Arc::downgrade(&inner) };
-    return (
-        Notify { inner },
-        listener
-    )
+    let listener = Listener {
+        inner: Arc::downgrade(&inner),
+    };
+    return (Notify { inner }, listener);
 }
 
 #[derive(Debug)]
@@ -24,9 +23,9 @@ struct Inner {
 
 /// Synchronous notifier. This structure can be used not block threads until desired,
 /// at which point all waiting threads can be awaken with [`notify_all`](Notify::notify_all).
-/// 
+///
 /// This structure drops loudly by default (a.k.a it will awake blocked threads when dropped),
-/// but can be droped silently via [`silent_drop`](Notify::loud_drop)
+/// but can be droped silently via [`silent_drop`](Notify::silent_drop)
 #[derive(Debug, Clone)]
 pub struct Notify {
     inner: Arc<Inner>,
@@ -58,7 +57,7 @@ impl Notify {
     /// Drops the notifier without awaking blocked threads.
     /// This method may leak memory.
     #[inline]
-    pub fn silent_drop (self) {
+    pub fn silent_drop(self) {
         if let Ok(mut inner) = Arc::try_unwrap(self.inner) {
             inner.wakers.chop_mut().for_each(Lock::silent_drop);
         }
@@ -102,7 +101,7 @@ cfg_if::cfg_if! {
 
         /// Synchronous notifier. This structure can be used not block tasks until desired,
         /// at which point all waiting tasks can be awaken with [`notify_all`](AsyncNotify::notify_all).
-        /// 
+        ///
         /// This structure drops loudly by default (a.k.a it will awake blocked tasks when dropped),
         /// but can be droped silently via [`silent_drop`](AsyncNotify::silent_drop)
         #[derive(Debug, Clone)]

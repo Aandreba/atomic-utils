@@ -1,30 +1,84 @@
-use core::sync::atomic::{Ordering};
+use core::sync::atomic::Ordering;
+use docfg::docfg;
+
+#[allow(non_camel_case_types)]
+pub type Atomic_c_char = <core::ffi::c_char as HasAtomic>::Atomic;
+#[allow(non_camel_case_types)]
+pub type Atomic_c_schar = <core::ffi::c_schar as HasAtomic>::Atomic;
+#[allow(non_camel_case_types)]
+pub type Atomic_c_uchar = <core::ffi::c_uchar as HasAtomic>::Atomic;
+#[allow(non_camel_case_types)]
+pub type Atomic_c_short = <core::ffi::c_short as HasAtomic>::Atomic;
+#[allow(non_camel_case_types)]
+pub type Atomic_c_ushort = <core::ffi::c_ushort as HasAtomic>::Atomic;
+#[allow(non_camel_case_types)]
+pub type Atomic_c_int = <core::ffi::c_int as HasAtomic>::Atomic;
+#[allow(non_camel_case_types)]
+pub type Atomic_c_uint = <core::ffi::c_uint as HasAtomic>::Atomic;
+#[allow(non_camel_case_types)]
+pub type Atomic_c_long = <core::ffi::c_long as HasAtomic>::Atomic;
+#[allow(non_camel_case_types)]
+pub type Atomic_c_ulong = <core::ffi::c_ulong as HasAtomic>::Atomic;
+#[allow(non_camel_case_types)]
+pub type Atomic_c_longlong = <core::ffi::c_longlong as HasAtomic>::Atomic;
+#[allow(non_camel_case_types)]
+pub type Atomic_c_ulonglong = <core::ffi::c_ulonglong as HasAtomic>::Atomic;
+#[docfg(feature = "nightly")]
+#[allow(non_camel_case_types)]
+pub type Atomic_c_size_t = <core::ffi::c_size_t as HasAtomic>::Atomic;
+#[docfg(feature = "nightly")]
+#[allow(non_camel_case_types)]
+pub type Atomic_c_ssize_t = <core::ffi::c_ssize_t as HasAtomic>::Atomic;
+#[docfg(feature = "nightly")]
+#[allow(non_camel_case_types)]
+pub type Atomic_c_ptrdiff_t = <core::ffi::c_ptrdiff_t as HasAtomic>::Atomic;
 
 pub trait HasAtomic {
     type Atomic: Atomic<Primitive = Self>;
 }
 
+#[allow(clippy::missing_errors_doc)]
 /// # Safety
 /// - `Self` must have the same size and alignment as [`Primitive`](`Atomic::Primitive`)
 pub unsafe trait Atomic: Send + Sync {
     type Primitive: HasAtomic<Atomic = Self>;
-    
-    fn new (v: Self::Primitive) -> Self;
-    fn get_mut (&mut self) -> &mut Self::Primitive;
-    fn into_inner (self) -> Self::Primitive;
-    fn load (&self, order: Ordering) -> Self::Primitive;
-    fn store (&self, val: Self::Primitive, order: Ordering);
-    fn swap (&self, val: Self::Primitive, order: Ordering) -> Self::Primitive;
-    fn compare_exchange (&self, current: Self::Primitive, new: Self::Primitive, success: Ordering, failure: Ordering) -> Result<Self::Primitive, Self::Primitive>;
-    fn compare_exchange_weak (&self, current: Self::Primitive, new: Self::Primitive, success: Ordering, failure: Ordering) -> Result<Self::Primitive, Self::Primitive>;
-    fn fetch_update<F: FnMut(Self::Primitive) -> Option<Self::Primitive>> (&self, set_order: Ordering, fetch_ordering: Ordering, f: F) -> Result<Self::Primitive, Self::Primitive>;
+
+    fn new(v: Self::Primitive) -> Self;
+    fn get_mut(&mut self) -> &mut Self::Primitive;
+    fn into_inner(self) -> Self::Primitive;
+    fn load(&self, order: Ordering) -> Self::Primitive;
+    fn store(&self, val: Self::Primitive, order: Ordering);
+    fn swap(&self, val: Self::Primitive, order: Ordering) -> Self::Primitive;
+
+    fn compare_exchange(
+        &self,
+        current: Self::Primitive,
+        new: Self::Primitive,
+        success: Ordering,
+        failure: Ordering,
+    ) -> Result<Self::Primitive, Self::Primitive>;
+
+    fn compare_exchange_weak(
+        &self,
+        current: Self::Primitive,
+        new: Self::Primitive,
+        success: Ordering,
+        failure: Ordering,
+    ) -> Result<Self::Primitive, Self::Primitive>;
+
+    fn fetch_update<F: FnMut(Self::Primitive) -> Option<Self::Primitive>>(
+        &self,
+        set_order: Ordering,
+        fetch_ordering: Ordering,
+        f: F,
+    ) -> Result<Self::Primitive, Self::Primitive>;
 }
 
 #[cfg_attr(docsrs, doc(cfg(feature = "const")))]
 #[cfg(feature = "const")]
 #[const_trait]
 pub trait AtomicConstNew: Atomic {
-    fn new (v: Self::Primitive) -> Self;
+    fn new(v: Self::Primitive) -> Self;
 }
 
 pub trait AtomicAdd<T = <Self as Atomic>::Primitive>: Atomic {
@@ -44,7 +98,6 @@ pub trait AtomicBitOr<T = <Self as Atomic>::Primitive>: Atomic {
     fn fetch_or(&self, val: T, order: Ordering) -> Self::Primitive;
 }
 
-
 pub trait AtomicBitXor<T = <Self as Atomic>::Primitive>: Atomic {
     fn fetch_xor(&self, val: T, order: Ordering) -> Self::Primitive;
 }
@@ -58,14 +111,21 @@ pub trait AtomicMax<T = <Self as Atomic>::Primitive>: Atomic {
 }
 
 // MARKER TRAITS
-pub trait AtomicNumOps<T = <Self as Atomic>::Primitive>: Atomic + AtomicAdd<T> + AtomicSub<T> {}
-pub trait AtomicBitOps<T = <Self as Atomic>::Primitive>: Atomic + AtomicBitAnd<T> + AtomicBitOr<T> + AtomicBitXor<T> {}
+pub trait AtomicNumOps<T = <Self as Atomic>::Primitive>:
+    Atomic + AtomicAdd<T> + AtomicSub<T>
+{
+}
+pub trait AtomicBitOps<T = <Self as Atomic>::Primitive>:
+    Atomic + AtomicBitAnd<T> + AtomicBitOr<T> + AtomicBitXor<T>
+{
+}
 pub trait AtomicOrd<T = <Self as Atomic>::Primitive>: Atomic + AtomicMin<T> + AtomicMax<T> {}
 pub trait AtomicNum: AtomicNumOps + AtomicOrd {}
 pub trait AtomicInt: AtomicNum + AtomicBitOps {}
 
 impl<T, U> AtomicNumOps<T> for U where U: Atomic + AtomicAdd<T> + AtomicSub<T> {}
-impl<T, U> AtomicBitOps<T> for U where U: Atomic + AtomicBitAnd<T> + AtomicBitOr<T> + AtomicBitXor<T> {}
+impl<T, U> AtomicBitOps<T> for U where U: Atomic + AtomicBitAnd<T> + AtomicBitOr<T> + AtomicBitXor<T>
+{}
 impl<T, U> AtomicOrd<T> for U where U: Atomic + AtomicMin<T> + AtomicMax<T> {}
 impl<T> AtomicNum for T where T: AtomicNumOps + AtomicOrd {}
 impl<T> AtomicInt for T where T: AtomicNum + AtomicBitOps {}
@@ -80,51 +140,51 @@ macro_rules! impl_atomic {
                 type Atomic = $atomic;
             }
 
-            #[cfg(target_has_atomic = $len)]
+            #[docfg(target_has_atomic = $len)]
             unsafe impl Atomic for $atomic {
                 type Primitive = $prim;
 
-                #[inline(always)]
+                #[inline]
                 fn new (v: Self::Primitive) -> Self {
                     <$atomic>::new(v)
                 }
 
-                #[inline(always)]
+                #[inline]
                 fn get_mut (&mut self) -> &mut Self::Primitive {
                     <$atomic>::get_mut(self)
                 }
 
-                #[inline(always)]
+                #[inline]
                 fn into_inner (self) -> Self::Primitive {
-                    <$atomic>::into_inner(self)    
+                    <$atomic>::into_inner(self)
                 }
 
-                #[inline(always)]
+                #[inline]
                 fn load (&self, order: Ordering) -> Self::Primitive {
                     <$atomic>::load(self, order)
                 }
 
-                #[inline(always)]
+                #[inline]
                 fn store (&self, val: Self::Primitive, order: Ordering) {
                     <$atomic>::store(self, val, order)
                 }
 
-                #[inline(always)]
+                #[inline]
                 fn swap (&self, val: Self::Primitive, order: Ordering) -> Self::Primitive {
                     <$atomic>::swap(self, val, order)
                 }
 
-                #[inline(always)]
+                #[inline]
                 fn compare_exchange (&self, current: Self::Primitive, new: Self::Primitive, success: Ordering, failure: Ordering) -> Result<Self::Primitive, Self::Primitive> {
                     <$atomic>::compare_exchange(self, current, new, success, failure)
                 }
 
-                #[inline(always)]
+                #[inline]
                 fn compare_exchange_weak (&self, current: Self::Primitive, new: Self::Primitive, success: Ordering, failure: Ordering) -> Result<Self::Primitive, Self::Primitive> {
                     <$atomic>::compare_exchange_weak(self, current, new, success, failure)
                 }
 
-                #[inline(always)]
+                #[inline]
                 fn fetch_update<F: FnMut(Self::Primitive) -> Option<Self::Primitive>> (&self, set_order: Ordering, fetch_ordering: Ordering, f: F) -> Result<Self::Primitive, Self::Primitive> {
                     <$atomic>::fetch_update(self, set_order, fetch_ordering, f)
                 }
@@ -134,7 +194,7 @@ macro_rules! impl_atomic {
                 if #[cfg(feature = "const")] {
                     #[cfg_attr(docsrs, doc(cfg(feature = "const")))]
                     impl const AtomicConstNew for $atomic {
-                        #[inline(always)]
+                        #[inline]
                         fn new (v: Self::Primitive) -> Self {
                             <$atomic>::new(v)
                         }
@@ -157,62 +217,62 @@ macro_rules! impl_int {
         $(
             impl_atomic!($len: $prim => $atomic);
 
-            #[cfg(target_has_atomic = $len)]
+            #[docfg(target_has_atomic = $len)]
             impl AtomicAdd for $atomic {
-                #[inline(always)]
+                #[inline]
                 fn fetch_add(&self, val: $prim, order: Ordering) -> $prim {
                     <$atomic>::fetch_add(self, val, order)
                 }
             }
 
-            #[cfg(target_has_atomic = $len)]
+            #[docfg(target_has_atomic = $len)]
             impl AtomicSub for $atomic {
-                #[inline(always)]
+                #[inline]
                 fn fetch_sub(&self, val: $prim, order: Ordering) -> $prim {
                     <$atomic>::fetch_sub(self, val, order)
                 }
             }
 
-            #[cfg(target_has_atomic = $len)]
+            #[docfg(target_has_atomic = $len)]
             impl AtomicBitAnd for $atomic {
-                #[inline(always)]
+                #[inline]
                 fn fetch_and(&self, val: $prim, order: Ordering) -> $prim {
                     <$atomic>::fetch_and(self, val, order)
                 }
 
-                #[inline(always)]
+                #[inline]
                 fn fetch_nand(&self, val: $prim, order: Ordering) -> $prim {
                     <$atomic>::fetch_nand(self, val, order)
                 }
             }
 
-            #[cfg(target_has_atomic = $len)]
+            #[docfg(target_has_atomic = $len)]
             impl AtomicBitOr for $atomic {
-                #[inline(always)]
+                #[inline]
                 fn fetch_or(&self, val: $prim, order: Ordering) -> $prim {
                     <$atomic>::fetch_or(self, val, order)
                 }
             }
 
-            #[cfg(target_has_atomic = $len)]
+            #[docfg(target_has_atomic = $len)]
             impl AtomicBitXor for $atomic {
-                #[inline(always)]
+                #[inline]
                 fn fetch_xor(&self, val: $prim, order: Ordering) -> $prim {
                     <$atomic>::fetch_xor(self, val, order)
                 }
             }
 
-            #[cfg(target_has_atomic = $len)]
+            #[docfg(target_has_atomic = $len)]
             impl AtomicMin for $atomic {
-                #[inline(always)]
+                #[inline]
                 fn fetch_min(&self, val: $prim, order: Ordering) -> $prim {
                     <$atomic>::fetch_min(self, val, order)
                 }
             }
 
-            #[cfg(target_has_atomic = $len)]
+            #[docfg(target_has_atomic = $len)]
             impl AtomicMax for $atomic {
-                #[inline(always)]
+                #[inline]
                 fn fetch_max(&self, val: $prim, order: Ordering) -> $prim {
                     <$atomic>::fetch_max(self, val, order)
                 }
@@ -234,57 +294,74 @@ impl_atomic! {
     "8": bool => core::sync::atomic::AtomicBool
 }
 
-#[cfg(target_has_atomic = "ptr")]
+#[docfg(target_has_atomic = "ptr")]
 impl<T> HasAtomic for *mut T {
     type Atomic = core::sync::atomic::AtomicPtr<T>;
 }
 
-#[cfg(target_has_atomic = "ptr")]
+#[docfg(target_has_atomic = "ptr")]
 unsafe impl<T> Atomic for core::sync::atomic::AtomicPtr<T> {
     type Primitive = *mut T;
 
-    #[inline(always)]
-    fn new (v: Self::Primitive) -> Self {
+    #[inline]
+    fn new(v: Self::Primitive) -> Self {
         core::sync::atomic::AtomicPtr::new(v)
     }
 
-    #[inline(always)]
-    fn get_mut (&mut self) -> &mut Self::Primitive {
+    #[inline]
+    fn get_mut(&mut self) -> &mut Self::Primitive {
         core::sync::atomic::AtomicPtr::get_mut(self)
     }
 
-    #[inline(always)]
-    fn into_inner (self) -> Self::Primitive {
+    #[inline]
+    fn into_inner(self) -> Self::Primitive {
         core::sync::atomic::AtomicPtr::into_inner(self)
     }
 
-    #[inline(always)]
-    fn load (&self, order: Ordering) -> Self::Primitive {
+    #[inline]
+    fn load(&self, order: Ordering) -> Self::Primitive {
         core::sync::atomic::AtomicPtr::load(self, order)
     }
 
-    #[inline(always)]
-    fn store (&self, val: Self::Primitive, order: Ordering) {
+    #[inline]
+    fn store(&self, val: Self::Primitive, order: Ordering) {
         core::sync::atomic::AtomicPtr::store(self, val, order)
     }
 
-    #[inline(always)]
-    fn swap (&self, val: Self::Primitive, order: Ordering) -> Self::Primitive {
+    #[inline]
+    fn swap(&self, val: Self::Primitive, order: Ordering) -> Self::Primitive {
         core::sync::atomic::AtomicPtr::swap(self, val, order)
     }
 
-    #[inline(always)]
-    fn compare_exchange (&self, current: Self::Primitive, new: Self::Primitive, success: Ordering, failure: Ordering) -> Result<Self::Primitive, Self::Primitive> {
+    #[inline]
+    fn compare_exchange(
+        &self,
+        current: Self::Primitive,
+        new: Self::Primitive,
+        success: Ordering,
+        failure: Ordering,
+    ) -> Result<Self::Primitive, Self::Primitive> {
         core::sync::atomic::AtomicPtr::compare_exchange(self, current, new, success, failure)
     }
 
-    #[inline(always)]
-    fn compare_exchange_weak (&self, current: Self::Primitive, new: Self::Primitive, success: Ordering, failure: Ordering) -> Result<Self::Primitive, Self::Primitive> {
+    #[inline]
+    fn compare_exchange_weak(
+        &self,
+        current: Self::Primitive,
+        new: Self::Primitive,
+        success: Ordering,
+        failure: Ordering,
+    ) -> Result<Self::Primitive, Self::Primitive> {
         core::sync::atomic::AtomicPtr::compare_exchange_weak(self, current, new, success, failure)
     }
 
-    #[inline(always)]
-    fn fetch_update<F: FnMut(Self::Primitive) -> Option<Self::Primitive>> (&self, set_order: Ordering, fetch_ordering: Ordering, f: F) -> Result<Self::Primitive, Self::Primitive> {
+    #[inline]
+    fn fetch_update<F: FnMut(Self::Primitive) -> Option<Self::Primitive>>(
+        &self,
+        set_order: Ordering,
+        fetch_ordering: Ordering,
+        f: F,
+    ) -> Result<Self::Primitive, Self::Primitive> {
         core::sync::atomic::AtomicPtr::fetch_update(self, set_order, fetch_ordering, f)
     }
 }

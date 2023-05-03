@@ -1,47 +1,52 @@
 use core::mem::ManuallyDrop;
 
+use crate::{
+    locks::{lock, Lock},
+    FillQueue,
+};
 use alloc::sync::{Arc, Weak};
-use crate::{FillQueue, locks::{Lock, lock}};
 
 /// A flag type that will be completed when all its references have been dropped or marked.
-/// 
+///
 /// This flag drops loudly by default (a.k.a will complete when dropped),
 /// but can be droped silently with [`silent_drop`](Flag::silent_drop)
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 #[derive(Debug, Clone)]
 pub struct Flag {
-    _inner: Arc<FlagQueue>
+    inner: Arc<FlagQueue>,
 }
 
 /// Subscriber of a [`Flag`]
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 #[derive(Debug, Clone)]
 pub struct Subscribe {
-    inner: Weak<FlagQueue>
+    inner: Weak<FlagQueue>,
 }
 
 impl Flag {
     /// See [`Arc::into_raw`]
-    #[inline(always)]
-    pub unsafe fn into_raw (self) -> *const FillQueue<Lock> {
-        Arc::into_raw(self._inner).cast()
+    #[inline]
+    pub unsafe fn into_raw(self) -> *const FillQueue<Lock> {
+        Arc::into_raw(self.inner).cast()
     }
 
     /// See [`Arc::from_raw`]
-    #[inline(always)]
-    pub unsafe fn from_raw (ptr: *const FillQueue<Lock>) -> Self {
-        Self { _inner: Arc::from_raw(ptr.cast()) }
+    #[inline]
+    pub unsafe fn from_raw(ptr: *const FillQueue<Lock>) -> Self {
+        Self {
+            inner: Arc::from_raw(ptr.cast()),
+        }
     }
 
     /// Mark this flag as completed, consuming it
-    #[inline(always)]
-    pub fn mark (self) {}
+    #[inline]
+    pub fn mark(self) {}
 
     /// Drops the flag without marking it as completed.
     /// This method may leak memory.
     #[inline]
-    pub fn silent_drop (self) {
-        if let Ok(inner) = Arc::try_unwrap(self._inner) {
+    pub fn silent_drop(self) {
+        if let Ok(inner) = Arc::try_unwrap(self.inner) {
             inner.silent_drop()
         }
     }
@@ -51,19 +56,19 @@ impl Subscribe {
     // Blocks the current thread until the flag gets marked.
     #[deprecated(since = "0.4.0", note = "use `wait` instead")]
     #[inline]
-    pub fn subscribe (&self) {
+    pub fn subscribe(&self) {
         self.wait()
     }
 
     /// Returns `true` if the flag has been marked, and `false` otherwise
     #[inline]
-    pub fn is_marked (&self) -> bool {
-        return self.inner.strong_count() == 0
+    pub fn is_marked(&self) -> bool {
+        return self.inner.strong_count() == 0;
     }
 
     // Blocks the current thread until the flag gets marked.
     #[inline]
-    pub fn wait (&self) {
+    pub fn wait(&self) {
         if let Some(queue) = self.inner.upgrade() {
             let (waker, sub) = lock();
             queue.0.push(waker);
@@ -74,22 +79,22 @@ impl Subscribe {
 }
 
 /// Creates a new pair of [`Flag`] and [`Subscribe`].
-/// 
+///
 /// The flag will be completed when all references to [`Flag`] have been dropped or marked.
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
-pub fn flag () -> (Flag, Subscribe) {
+pub fn flag() -> (Flag, Subscribe) {
     let flag = Arc::new(FlagQueue(FillQueue::new()));
     let sub = Arc::downgrade(&flag);
-    (Flag { _inner: flag }, Subscribe { inner: sub })
+    (Flag { inner: flag }, Subscribe { inner: sub })
 }
 
 #[repr(transparent)]
 #[derive(Debug)]
-struct FlagQueue (pub FillQueue<Lock>);
+struct FlagQueue(pub FillQueue<Lock>);
 
 impl FlagQueue {
     #[inline]
-    pub fn silent_drop (self) {
+    pub fn silent_drop(self) {
         let mut this = ManuallyDrop::new(self);
         this.0.chop_mut().for_each(Lock::silent_drop);
         unsafe { core::ptr::drop_in_place(&mut this) };
@@ -97,7 +102,7 @@ impl FlagQueue {
 }
 
 impl Drop for FlagQueue {
-    #[inline(always)]
+    #[inline]
     fn drop(&mut self) {
         self.0.chop_mut().for_each(Lock::wake);
     }
@@ -127,30 +132,31 @@ cfg_if::cfg_if! {
 
         impl AsyncFlag {
             /// Creates a new flag
+            #[allow(clippy::new_without_default)]
             #[deprecated(since = "0.4.0", note = "use `async_flag` instead")]
-            #[inline(always)]
+            #[inline]
             pub fn new () -> Self {
                 Self { inner: Arc::new(AsyncFlagQueue(FillQueue::new())) }
             }
 
             /// See [`Arc::into_raw`]
-            #[inline(always)]
+            #[inline]
             pub unsafe fn into_raw (self) -> *const FillQueue<Waker> {
                 Arc::into_raw(self.inner).cast()
             }
 
             /// See [`Arc::from_raw`]
-            #[inline(always)]
+            #[inline]
             pub unsafe fn from_raw (ptr: *const FillQueue<Waker>) -> Self {
                 Self { inner: Arc::from_raw(ptr.cast()) }
             }
 
             /// Marks this flag as complete, consuming it
-            #[inline(always)]
+            #[inline]
             pub fn mark (self) {}
 
             /// Creates a new subscriber to this flag.
-            #[inline(always)]
+            #[inline]
             pub fn subscribe (&self) -> AsyncSubscribe {
                 AsyncSubscribe {
                     inner: Some(Arc::downgrade(&self.inner))
@@ -191,16 +197,16 @@ cfg_if::cfg_if! {
         impl Future for AsyncSubscribe {
             type Output = ();
 
-            #[inline(always)]
+            #[inline]
             fn poll(mut self: core::pin::Pin<&mut Self>, cx: &mut core::task::Context<'_>) -> core::task::Poll<Self::Output> {
                 if let Some(ref queue) = self.inner {
                     if let Some(queue) = queue.upgrade() {
                         queue.0.push(cx.waker().clone());
                         return Poll::Pending;
-                    } else {
-                        self.inner = None;
-                        return Poll::Ready(())
                     }
+
+                    self.inner = None;
+                    return Poll::Ready(())
                 }
 
                 return Poll::Ready(())
@@ -208,7 +214,7 @@ cfg_if::cfg_if! {
         }
 
         impl FusedFuture for AsyncSubscribe {
-            #[inline(always)]
+            #[inline]
             fn is_terminated(&self) -> bool {
                 self.inner.is_none()
             }
@@ -228,7 +234,7 @@ cfg_if::cfg_if! {
         }
 
         impl Drop for AsyncFlagQueue {
-            #[inline(always)]
+            #[inline]
             fn drop(&mut self) {
                 self.0.chop_mut().for_each(Waker::wake);
             }
