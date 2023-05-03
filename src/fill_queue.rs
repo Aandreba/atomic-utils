@@ -27,9 +27,52 @@ macro_rules! impl_all {
     };
 }
 
-struct FillQueueNode<T> {
+struct PrevCell<T> {
     init: InnerAtomicFlag,
-    prev: *mut Self,
+    prev: AtomicPtr<FillQueueNode<T>>,
+}
+
+impl<T> PrevCell<T> {
+    #[inline]
+    pub const fn new() -> Self {
+        return Self {
+            init: InnerAtomicFlag::new(FALSE),
+            prev: AtomicPtr::new(core::ptr::null_mut()),
+        };
+    }
+
+    #[inline]
+    pub fn set(&self, prev: *mut FillQueueNode<T>) {
+        cfg_if::cfg_if! {
+            if #[cfg(debug_assertions)] {
+                assert!(self.prev.swap(prev, Ordering::AcqRel).is_null());
+                self.init.store(TRUE, Ordering::Release);
+            } else {
+                self.prev.store(prev, Ordering::Release);
+                self.init.store(TRUE, Ordering::Release);
+            }
+        }
+    }
+
+    #[inline]
+    pub fn set_mut(&mut self, prev: *mut FillQueueNode<T>) {
+        let this_prev = self.prev.get_mut();
+        debug_assert!(this_prev.is_null());
+
+        *this_prev = prev;
+        *self.init.get_mut() = TRUE;
+    }
+
+    pub fn get(&self) -> *mut FillQueueNode<T> {
+        while self.init.load(Ordering::Acquire) == FALSE {
+            core::hint::spin_loop()
+        }
+        return self.prev.swap(core::ptr::null_mut(), Ordering::Acquire);
+    }
+}
+
+struct FillQueueNode<T> {
+    prev: PrevCell<T>,
     v: T,
 }
 
@@ -182,8 +225,7 @@ impl_all! {
         /// ```
         pub fn try_push (&self, v: T) -> Result<(), AllocError> {
             let node = FillQueueNode {
-                init: InnerAtomicFlag::new(FALSE),
-                prev: core::ptr::null_mut(),
+                prev: PrevCell::new(),
                 v
             };
 
@@ -202,9 +244,8 @@ impl_all! {
 
             let prev = self.head.swap(ptr.as_ptr(), Ordering::AcqRel);
             unsafe {
-                let rf = &mut *ptr.as_ptr();
-                rf.prev = prev;
-                rf.init.store(TRUE, Ordering::Release);
+                let rf = &*ptr.as_ptr();
+                rf.prev.set(prev);
             }
 
             Ok(())
@@ -231,8 +272,7 @@ impl_all! {
         /// ```
         pub fn try_push_mut (&mut self, v: T) -> Result<(), AllocError> {
             let node = FillQueueNode {
-                init: InnerAtomicFlag::new(TRUE),
-                prev: core::ptr::null_mut(),
+                prev: PrevCell::new(),
                 v
             };
 
@@ -248,7 +288,7 @@ impl_all! {
             unsafe {
                 ptr.as_ptr().write(node);
                 let prev = core::ptr::replace(self.head.get_mut(), ptr.as_ptr());
-                ptr.as_mut().prev = prev;
+                ptr.as_mut().prev.set_mut(prev);
                 Ok(())
             }
         }
@@ -406,16 +446,16 @@ impl_all! {
         fn next(&mut self) -> Option<Self::Item> {
             if let Some(ptr) = self.ptr {
                 unsafe {
-                    let node = core::ptr::read(ptr.as_ptr());
+                    let node = &*ptr.as_ptr();
+                    let value = core::ptr::read(&node.v);
+                    self.ptr = NonNull::new(node.prev.get());
 
                     #[cfg(feature = "alloc_api")]
                     self.alloc.deallocate(ptr.cast(), Layout::new::<FillQueueNode<T>>());
                     #[cfg(not(feature = "alloc_api"))]
                     alloc::alloc::dealloc(ptr.as_ptr().cast(), Layout::new::<FillQueueNode<T>>());
 
-                    while node.init.load(Ordering::Acquire) == FALSE { core::hint::spin_loop() }
-                    self.ptr = NonNull::new(node.prev);
-                    return Some(node.v)
+                    return Some(value)
                 }
             }
 
@@ -428,19 +468,7 @@ impl_all! {
     impl @Drop => ChopIter {
         #[inline]
         fn drop(&mut self) {
-            while let Some(ptr) = self.ptr {
-                unsafe {
-                    let node = core::ptr::read(ptr.as_ptr());
-
-                    #[cfg(feature = "alloc_api")]
-                    self.alloc.deallocate(ptr.cast(), Layout::new::<FillQueueNode<T>>());
-                    #[cfg(not(feature = "alloc_api"))]
-                    alloc::alloc::dealloc(ptr.as_ptr().cast(), Layout::new::<FillQueueNode<T>>());
-
-                    while node.init.load(Ordering::Acquire) == FALSE { core::hint::spin_loop() }
-                    self.ptr = NonNull::new(node.prev);
-                }
-            }
+            self.for_each(core::mem::drop)
         }
     }
 }
