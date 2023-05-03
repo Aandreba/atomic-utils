@@ -8,6 +8,7 @@
 #![allow(clippy::module_name_repetitions)]
 #![allow(clippy::wildcard_imports)]
 #![allow(clippy::explicit_deref_methods)]
+#![cfg_attr(test, allow(clippy::bool_assert_comparison))]
 /* */
 #![cfg_attr(feature = "nightly", feature(int_roundings, negative_impls, c_size_t))]
 #![cfg_attr(all(feature = "nightly", feature = "alloc"), feature(new_uninit))]
@@ -69,7 +70,7 @@ cfg_if::cfg_if! {
 
         #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
         pub use fill_queue::FillQueue;
-        #[docfg::docfg(all(feature = "alloc", feature = "nightly"))]
+        #[docfg::docfg(feature = "alloc")]
         pub use bitfield::AtomicBitBox;
     }
 }

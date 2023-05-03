@@ -1,3 +1,4 @@
+#![cfg(feature = "alloc")]
 #![cfg_attr(feature = "alloc_api", feature(allocator_api))]
 
 use utils_atomics::cell::AtomicCell;

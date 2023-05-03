@@ -6,6 +6,7 @@ use core::{
 };
 
 /// Inverse of a `OnceCell`. It initializes with a value, which then can be raced by other threads to take.
+///
 /// Once the value is taken, it can never be taken again.
 pub struct TakeCell<T> {
     taken: InnerAtomicFlag,
@@ -81,3 +82,52 @@ impl<T> Drop for TakeCell<T> {
 
 unsafe impl<T: Send> Send for TakeCell<T> {}
 unsafe impl<T: Sync> Sync for TakeCell<T> {}
+
+// Thanks ChatGPT!
+#[cfg(test)]
+mod tests {
+    use super::TakeCell;
+
+    #[test]
+    fn test_normal_conditions() {
+        let cell = TakeCell::new(42);
+        assert_eq!(cell.is_taken(), false);
+        assert_eq!(cell.try_take(), Some(42));
+        assert_eq!(cell.is_taken(), true);
+        assert_eq!(cell.try_take(), None);
+
+        let mut cell = TakeCell::new(42);
+        assert_eq!(cell.try_take_mut(), Some(42));
+        assert_eq!(cell.try_take_mut(), None);
+    }
+
+    #[cfg(miri)]
+    #[test]
+    fn test_stressed_conditions() {
+        use std::{
+            sync::{Arc, Barrier},
+            thread,
+        };
+
+        let cell = Arc::new(TakeCell::new(42));
+        let barrier = Arc::new(Barrier::new(10));
+
+        let mut handles = vec![];
+
+        for _ in 0..10 {
+            let c = Arc::clone(&cell);
+            let b = Arc::clone(&barrier);
+            handles.push(thread::spawn(move || {
+                b.wait();
+                c.try_take()
+            }));
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        assert_eq!(cell.is_taken(), true);
+        assert_eq!(cell.try_take(), None);
+    }
+}

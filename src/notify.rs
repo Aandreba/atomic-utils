@@ -94,6 +94,20 @@ cfg_if::cfg_if! {
         use core::task::Poll;
         use futures::stream::FusedStream;
 
+        /// Creates a new async notifier and a listener to it.
+        pub fn async_notify() -> (AsyncNotify, AsyncListener) {
+            let inner = Arc::new(AsyncInner {
+                wakers: FillQueue::new(),
+            });
+
+            let listener = AsyncListener {
+                inner: Some(Arc::downgrade(&inner)),
+                sub: None
+            };
+
+            return (AsyncNotify { inner }, listener);
+        }
+
         #[derive(Debug)]
         struct AsyncInner {
             wakers: FillQueue<AsyncFlag>,
@@ -157,27 +171,24 @@ cfg_if::cfg_if! {
         impl Stream for AsyncListener {
             type Item = ();
 
-            #[inline]
             fn poll_next(mut self: core::pin::Pin<&mut Self>, cx: &mut core::task::Context<'_>) -> core::task::Poll<Option<Self::Item>> {
-                if self.sub.is_none() {
-                    if let Some(inner) = self.inner.as_ref().and_then(Weak::upgrade) {
-                        let (flag, sub) = async_flag();
-                        inner.wakers.push(flag);
-                        self.sub = Some(sub);
-                    } else {
-                        self.inner = None;
-                        return core::task::Poll::Ready(None)
+                if let Some(ref mut sub) = self.sub {
+                    return match sub.poll_unpin(cx) {
+                        Poll::Ready(_) => {
+                            self.sub = None;
+                            Poll::Ready(Some(()))
+                        },
+                        Poll::Pending => Poll::Pending
                     }
+                } else if let Some(inner) = self.inner.as_ref().and_then(Weak::upgrade) {
+                    let (flag, sub) = async_flag();
+                    inner.wakers.push(flag);
+                    self.sub = Some(sub);
+                    return self.poll_next(cx)
                 }
 
-                let sub = unsafe { self.sub.as_mut().unwrap_unchecked() };
-                return match sub.poll_unpin(cx) {
-                    Poll::Ready(_) => {
-                        self.sub = None;
-                        return Poll::Ready(Some(()))
-                    },
-                    Poll::Pending => Poll::Pending
-                }
+                self.inner = None;
+                return core::task::Poll::Ready(None)
             }
 
             #[inline]
@@ -213,5 +224,109 @@ cfg_if::cfg_if! {
                 }
             }
         }
+    }
+}
+
+// Thanks ChatGPT!
+#[cfg(all(feature = "std", test))]
+mod tests {
+    use super::notify;
+    use std::{thread, time::Duration};
+
+    #[test]
+    fn test_basic_functionality() {
+        let (notify, listener) = notify();
+        assert_eq!(notify.listeners(), 1);
+
+        let listener2 = notify.listen();
+        assert_eq!(notify.listeners(), 2);
+
+        let handle = thread::spawn(move || {
+            listener2.recv();
+        });
+
+        thread::sleep(Duration::from_millis(100));
+        notify.notify_all();
+        handle.join().unwrap();
+
+        assert_eq!(notify.listeners(), 1);
+        drop(listener);
+    }
+
+    #[cfg(miri)]
+    #[test]
+    fn test_multi_threaded() {
+        use std::sync::{Arc, Barrier};
+
+        let (notify, listener) = notify();
+        let barrier = Arc::new(Barrier::new(11));
+        let mut handles = vec![];
+
+        for _ in 0..10 {
+            let notify_clone = notify.clone();
+            let barrier_clone = Arc::clone(&barrier);
+            let listener_clone = listener.clone();
+            handles.push(thread::spawn(move || {
+                barrier_clone.wait();
+                listener_clone.recv();
+                notify_clone.listeners()
+            }));
+        }
+
+        barrier.wait();
+        thread::sleep(Duration::from_millis(100));
+        notify.notify_all();
+
+        for handle in handles {
+            let remaining_listeners = handle.join().unwrap();
+            assert_eq!(remaining_listeners, 1);
+        }
+    }
+}
+
+#[cfg(all(feature = "futures", test))]
+mod async_tests {
+    use crate::notify::async_notify;
+    use core::time::Duration;
+    use futures::stream::StreamExt;
+
+    #[tokio::test]
+    async fn test_basic_functionality_async_tokio() {
+        let (notify, listener) = async_notify();
+        assert_eq!(notify.listeners(), 1);
+
+        let mut listener2 = notify.listen();
+        let handle = tokio::spawn(async move {
+            assert_eq!(listener2.next().await, Some(()));
+        });
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        notify.notify_all();
+
+        drop(listener);
+        handle.await.unwrap();
+        assert_eq!(notify.listeners(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_multi_task_async_tokio() {
+        let (notify, listener) = async_notify();
+        let mut handles = vec![];
+
+        for _ in 0..10 {
+            let mut listener_clone = listener.clone();
+            let handle = tokio::spawn(async move {
+                assert_eq!(listener_clone.next().await, Some(()));
+            });
+
+            handles.push(handle);
+        }
+
+        drop(listener);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        notify.notify_all();
+
+        let _ = futures::future::try_join_all(handles).await.unwrap();
+        assert_eq!(notify.listeners(), 0);
     }
 }
