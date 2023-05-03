@@ -231,7 +231,10 @@ cfg_if::cfg_if! {
 #[cfg(all(feature = "std", test))]
 mod tests {
     use super::notify;
-    use std::{thread, time::Duration};
+    use std::{
+        thread::{self, JoinHandle},
+        time::Duration,
+    };
 
     #[test]
     fn test_basic_functionality() {
@@ -263,13 +266,11 @@ mod tests {
         let mut handles = vec![];
 
         for _ in 0..10 {
-            let notify_clone = notify.clone();
             let barrier_clone = Arc::clone(&barrier);
             let listener_clone = listener.clone();
             handles.push(thread::spawn(move || {
                 barrier_clone.wait();
                 listener_clone.recv();
-                notify_clone.listeners()
             }));
         }
 
@@ -277,10 +278,12 @@ mod tests {
         thread::sleep(Duration::from_millis(100));
         notify.notify_all();
 
-        for handle in handles {
-            let remaining_listeners = handle.join().unwrap();
-            assert_eq!(remaining_listeners, 1);
-        }
+        handles
+            .into_iter()
+            .map(JoinHandle::join)
+            .for_each(Result::unwrap);
+
+        assert_eq!(listener.listeners(), 1);
     }
 }
 
