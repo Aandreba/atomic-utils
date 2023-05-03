@@ -232,7 +232,7 @@ cfg_if::cfg_if! {
 mod tests {
     use super::notify;
     use std::{
-        thread::{self, JoinHandle},
+        thread::{self},
         time::Duration,
     };
 
@@ -260,6 +260,7 @@ mod tests {
     #[test]
     fn test_multi_threaded() {
         use std::sync::{Arc, Barrier};
+        use std::thread::JoinHandle;
 
         let (notify, listener) = notify();
         let barrier = Arc::new(Barrier::new(11));

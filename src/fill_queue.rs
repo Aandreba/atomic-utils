@@ -493,3 +493,56 @@ impl<T> Debug for FillQueue<T> {
         f.debug_struct("FillQueue").finish_non_exhaustive()
     }
 }
+
+// Thanks ChatGPT!
+#[cfg(test)]
+mod tests {
+    use super::FillQueue;
+
+    #[test]
+    fn test_basic_functionality() {
+        let mut fill_queue = FillQueue::new();
+        assert!(fill_queue.is_empty());
+
+        fill_queue.push(1);
+        fill_queue.push(2);
+        fill_queue.push(3);
+
+        assert!(!fill_queue.is_empty());
+
+        let mut chop_iter = fill_queue.chop_mut();
+        assert_eq!(chop_iter.next(), Some(3));
+        assert_eq!(chop_iter.next(), Some(2));
+        assert_eq!(chop_iter.next(), Some(1));
+        assert_eq!(chop_iter.next(), None);
+
+        assert!(fill_queue.is_empty());
+    }
+
+    #[cfg(miri)]
+    #[test]
+    fn test_concurrent_fill_queue() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let fill_queue = Arc::new(FillQueue::new());
+        let mut handles = Vec::new();
+
+        for _ in 0..10 {
+            let fill_queue_clone = Arc::clone(&fill_queue);
+            let handle = thread::spawn(move || {
+                for i in 1..=10 {
+                    fill_queue_clone.push(i);
+                }
+            });
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let count = fill_queue.chop().count();
+        assert_eq!(count, 100);
+    }
+}
