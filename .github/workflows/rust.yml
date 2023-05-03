@@ -2,30 +2,46 @@ name: Rust
 
 on:
   push:
-    branches: [ "master" ]
+    branches: ["master"]
   pull_request:
-    branches: [ "master" ]
+    branches: ["master"]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   miri:
+    runs-on: ubuntu-latest
     steps:
-    - env:
-      RUST_BACKTRACE: 1
-      
+      - name: Add miri component to toolchain
+        run: rustup component add miri
+      - name: Run miri
+        env:
+          RUST_BACKTRACE: "1"
+          MIRIFLAGS: "-Zmiri-disable-isolation"
+        run: cargo miri test
 
   check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+      - name: Add miri component to toolchain
+        run: rustup component add clippy
+      - run: cargo clippy --no-default-features -- -Dwarnings
+      - run: cargo clippy --no-default-features --features std -- -Dwarnings
+      - run: cargo clippy --no-default-features --features alloc -- -Dwarnings
+      - run: cargo clippy --no-default-features --features nightly -- -Dwarnings
+      - run: cargo clippy --features alloc_api -- -Dwarnings
+      - run: cargo clippy --features futures -- -Dwarnings
+      - run: cargo clippy --features const -- -Dwarnings
 
-  build:
+  test:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
+      - uses: actions/checkout@v3
+      - run: cargo test --no-default-features
+      - run: cargo test --no-default-features --features std
+      - run: cargo test --no-default-features --features alloc
+      - run: cargo test --no-default-features --features nightly
+      - run: cargo test --features futures
+      - run: cargo test --features const
