@@ -243,3 +243,107 @@ impl<T> BitFieldAble for T where
         + Not<Output = Self>
 {
 }
+
+// Thanks ChatGPT!
+#[cfg(test)]
+mod tests {
+    use core::sync::atomic::{AtomicU16, Ordering};
+
+    pub type AtomicBitBox = super::AtomicBitBox<AtomicU16>;
+
+    #[test]
+    fn new_bitbox() {
+        let bitbox = AtomicBitBox::new(10);
+        for i in 0..10 {
+            assert_eq!(bitbox.get(i, Ordering::SeqCst), Some(false));
+        }
+    }
+
+    #[test]
+    fn set_and_get() {
+        let bitbox = AtomicBitBox::new(10);
+
+        bitbox.set_true(2, Ordering::SeqCst);
+        bitbox.set_true(7, Ordering::SeqCst);
+
+        for i in 0..10 {
+            let expected = (i == 2) || (i == 7);
+            assert_eq!(bitbox.get(i, Ordering::SeqCst), Some(expected));
+        }
+    }
+
+    #[test]
+    fn set_false_and_get() {
+        let bitbox = AtomicBitBox::new(10);
+
+        bitbox.set_true(2, Ordering::SeqCst);
+        bitbox.set_true(7, Ordering::SeqCst);
+
+        bitbox.set_false(2, Ordering::SeqCst);
+
+        for i in 0..10 {
+            let expected = i == 7;
+            assert_eq!(bitbox.get(i, Ordering::SeqCst), Some(expected));
+        }
+    }
+
+    #[test]
+    fn out_of_bounds() {
+        let bitbox = AtomicBitBox::new(10);
+        assert_eq!(bitbox.get(11, Ordering::SeqCst), None);
+        assert_eq!(bitbox.set_true(11, Ordering::SeqCst), None);
+        assert_eq!(bitbox.set_false(11, Ordering::SeqCst), None);
+    }
+
+    #[cfg(feature = "alloc_api")]
+    mod custom_allocator {
+        use core::sync::atomic::{AtomicU16, Ordering};
+        use std::alloc::System;
+
+        pub type AtomicBitBox = super::super::AtomicBitBox<AtomicU16, System>;
+
+        #[test]
+        fn new_bitbox() {
+            let bitbox = AtomicBitBox::new_in(10, System);
+            for i in 0..10 {
+                assert_eq!(bitbox.get(i, Ordering::SeqCst), Some(false));
+            }
+        }
+
+        #[test]
+        fn set_and_get() {
+            let bitbox = AtomicBitBox::new_in(10, System);
+
+            bitbox.set_true(2, Ordering::SeqCst);
+            bitbox.set_true(7, Ordering::SeqCst);
+
+            for i in 0..10 {
+                let expected = (i == 2) || (i == 7);
+                assert_eq!(bitbox.get(i, Ordering::SeqCst), Some(expected));
+            }
+        }
+
+        #[test]
+        fn set_false_and_get() {
+            let bitbox = AtomicBitBox::new_in(10, System);
+
+            bitbox.set_true(2, Ordering::SeqCst);
+            bitbox.set_true(7, Ordering::SeqCst);
+
+            bitbox.set_false(2, Ordering::SeqCst);
+
+            for i in 0..10 {
+                let expected = i == 7;
+                assert_eq!(bitbox.get(i, Ordering::SeqCst), Some(expected));
+            }
+        }
+
+        #[test]
+        fn out_of_bounds() {
+            let bitbox = AtomicBitBox::new_in(10, System);
+            assert_eq!(bitbox.get(11, Ordering::SeqCst), None);
+            assert_eq!(bitbox.set_true(11, Ordering::SeqCst), None);
+            assert_eq!(bitbox.set_false(11, Ordering::SeqCst), None);
+        }
+    }
+}
