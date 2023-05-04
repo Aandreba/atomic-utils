@@ -305,7 +305,6 @@ mod tests {
 }
 
 #[cfg(all(feature = "futures", test))]
-#[cfg_attr(miri, ignore)]
 mod async_tests {
     use super::{async_flag, AsyncFlag};
     use core::time::Duration;

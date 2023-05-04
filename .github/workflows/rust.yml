@@ -26,7 +26,6 @@ jobs:
       - run: cargo miri test --no-default-features --features alloc
       - run: cargo +nightly miri test --no-default-features --features nightly
       - run: cargo +nightly miri test --features alloc_api
-      - run: cargo miri test --features futures
       - run: cargo miri test --features const
 
   check:

@@ -280,6 +280,7 @@ mod tests {
         assert!(elapsed >= Duration::from_millis(200), "{elapsed:?}");
     }
 
+    #[cfg(feature = "std")]
     #[test]
     fn test_subscribe_wait() {
         let (flag, subscribe) = flag();
@@ -337,21 +338,39 @@ mod tests {
             assert!(async_subscribe.is_marked());
         }
 
-        #[test]
-        fn test_async_flag_silent_drop() {
-            let (async_flag, async_subscribe) = async_flag();
-            async_flag.silent_drop();
-            assert!(!async_subscribe.is_marked());
+        #[tokio::test]
+        async fn test_flag_silent_drop() {
+            use core::time::Duration;
+            use std::time::Instant;
+
+            let (flag, subscribe) = async_flag();
+
+            let handle = tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                flag.silent_drop();
+            });
+
+            let elapsed = tokio::time::timeout(std::time::Duration::from_millis(200), async move {
+                let now = Instant::now();
+                subscribe.await;
+                now.elapsed()
+            })
+            .await;
+
+            handle.await.unwrap();
+            match elapsed {
+                Ok(t) if t < Duration::from_millis(200) => panic!("{t:?}"),
+                _ => {}
+            }
         }
 
         #[tokio::test]
         async fn test_async_subscribe_wait() {
             let (async_flag, async_subscribe) = async_flag();
-            let async_flag_clone = async_flag.clone();
 
             let handle = tokio::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                async_flag_clone.mark();
+                async_flag.mark();
             });
 
             // Wait for the async_flag_clone to be marked
@@ -359,6 +378,32 @@ mod tests {
 
             // Wait for the async_subscribe to complete
             async_subscribe.await;
+        }
+
+        #[tokio::test]
+        async fn test_async_flag_stress() {
+            const TASKS: usize = 10;
+            const ITERATIONS: usize = 10;
+
+            for _ in 0..ITERATIONS {
+                let (async_flag, async_subscribe) = async_flag();
+                let mut handles = Vec::with_capacity(TASKS);
+
+                for _ in 0..TASKS {
+                    let async_flag_clone = async_flag.clone();
+                    let handle = tokio::spawn(async move {
+                        async_flag_clone.mark();
+                    });
+                    handles.push(handle);
+                }
+
+                drop(async_flag);
+                async_subscribe.await;
+
+                for handle in handles {
+                    handle.await.unwrap();
+                }
+            }
         }
     }
 }
