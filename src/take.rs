@@ -101,9 +101,11 @@ mod tests {
         assert_eq!(cell.try_take_mut(), None);
     }
 
-    #[cfg(miri)]
+    #[cfg(feature = "std")]
+    #[cfg_attr(not(miri), ignore)]
     #[test]
     fn test_stressed_conditions() {
+        use alloc::vec::Vec;
         use std::{
             sync::{Arc, Barrier},
             thread,
@@ -112,7 +114,7 @@ mod tests {
         let cell = Arc::new(TakeCell::new(42));
         let barrier = Arc::new(Barrier::new(10));
 
-        let mut handles = vec![];
+        let mut handles = Vec::new();
 
         for _ in 0..10 {
             let c = Arc::clone(&cell);

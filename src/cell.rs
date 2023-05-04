@@ -152,6 +152,9 @@ cfg_if::cfg_if! {
                 }
             }
         }
+
+        unsafe impl<T: Send, A: Allocator + Send> Send for AtomicCell<T, A> {}
+        unsafe impl<T: Sync, A: Allocator + Sync> Sync for AtomicCell<T, A> {}
     } else {
         impl<T> AtomicCell<T> {
             #[inline]
@@ -182,6 +185,9 @@ cfg_if::cfg_if! {
                 }
             }
         }
+
+        unsafe impl<T: Send> Send for AtomicCell<T> {}
+        unsafe impl<T: Sync> Sync for AtomicCell<T> {}
     }
 }
 
@@ -282,7 +288,7 @@ mod tests {
         }
     }
 
-    #[cfg(miri)]
+    #[cfg(all(feature = "std", miri))]
     mod miri {
         // Add other imports from previous tests
         use crate::cell::AtomicCell;

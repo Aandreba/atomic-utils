@@ -66,6 +66,8 @@ cfg_if::cfg_if! {
         pub mod notify;
         #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
         pub mod cell;
+        #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
+        pub mod arc_cell;
         pub(crate) mod locks;
 
         #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]

@@ -1,10 +1,9 @@
-use core::mem::ManuallyDrop;
-
 use crate::{
     locks::{lock, Lock},
     FillQueue,
 };
 use alloc::sync::{Arc, Weak};
+use core::mem::ManuallyDrop;
 
 /// A flag type that will be completed when all its references have been dropped or marked.
 ///
@@ -54,21 +53,8 @@ impl Flag {
 
 impl Subscribe {
     // Blocks the current thread until the flag gets marked.
-    #[deprecated(since = "0.4.0", note = "use `wait` instead")]
     #[inline]
-    pub fn subscribe(&self) {
-        self.wait()
-    }
-
-    /// Returns `true` if the flag has been marked, and `false` otherwise
-    #[inline]
-    pub fn is_marked(&self) -> bool {
-        return self.inner.strong_count() == 0;
-    }
-
-    // Blocks the current thread until the flag gets marked.
-    #[inline]
-    pub fn wait(&self) {
+    pub fn wait(self) {
         if let Some(queue) = self.inner.upgrade() {
             let (waker, sub) = lock();
             queue.0.push(waker);
@@ -117,10 +103,9 @@ cfg_if::cfg_if! {
         #[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "futures"))))]
         #[inline]
         pub fn async_flag () -> (AsyncFlag, AsyncSubscribe) {
-            #[allow(deprecated)]
-            let flag = AsyncFlag::new();
-            let sub = flag.subscribe();
-            return (flag, sub)
+            let flag = Arc::new(AsyncFlagQueue(FillQueue::new()));
+            let sub = Arc::downgrade(&flag);
+            return (AsyncFlag { inner: flag }, AsyncSubscribe { inner: Some(sub) })
         }
 
         /// Async flag that will be completed when all references to [`Flag`] have been dropped or marked.
@@ -131,14 +116,6 @@ cfg_if::cfg_if! {
         }
 
         impl AsyncFlag {
-            /// Creates a new flag
-            #[allow(clippy::new_without_default)]
-            #[deprecated(since = "0.4.0", note = "use `async_flag` instead")]
-            #[inline]
-            pub fn new () -> Self {
-                Self { inner: Arc::new(AsyncFlagQueue(FillQueue::new())) }
-            }
-
             /// See [`Arc::into_raw`]
             #[inline]
             pub unsafe fn into_raw (self) -> *const FillQueue<Waker> {
@@ -238,6 +215,108 @@ cfg_if::cfg_if! {
             fn drop(&mut self) {
                 self.0.chop_mut().for_each(Waker::wake);
             }
+        }
+    }
+}
+
+#[cfg(all(feature = "std", test))]
+mod tests {
+    use super::flag;
+    use core::time::Duration;
+    use std::thread;
+
+    #[test]
+    fn test_normal_conditions() {
+        let (f, _) = flag();
+        // Test marking the flag.
+        f.mark();
+
+        // Test waiting for the flag.
+        let (f, s) = flag();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(100));
+            f.mark();
+        });
+
+        s.wait();
+    }
+
+    #[cfg_attr(not(miri), ignore)]
+    #[test]
+    fn test_stressed_conditions() {
+        let mut handles = Vec::new();
+        let (f, s) = flag();
+
+        for _ in 0..10 {
+            let cloned_s = s.clone();
+            let handle = thread::spawn(move || {
+                for _ in 0..10 {
+                    let cloned_s = cloned_s.clone();
+                    cloned_s.wait();
+                }
+            });
+            handles.push(handle);
+        }
+
+        thread::sleep(Duration::from_millis(100));
+
+        for _ in 0..9 {
+            f.clone().mark();
+        }
+        f.mark();
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+    }
+}
+
+#[cfg(all(feature = "futures", test))]
+#[cfg_attr(miri, ignore)]
+mod async_tests {
+    use super::async_flag;
+    use core::time::Duration;
+
+    #[tokio::test]
+    async fn test_async_normal_conditions() {
+        let (f, s) = async_flag();
+        assert_eq!(s.is_marked(), false);
+
+        // Test marking the flag.
+        f.mark();
+        assert_eq!(s.is_marked(), true);
+
+        // Test waiting for the flag.
+        let (f, mut s) = async_flag();
+
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            f.mark();
+        });
+
+        (&mut s).await;
+        assert_eq!(s.is_marked(), true);
+    }
+
+    #[tokio::test]
+    async fn test_async_stressed_conditions() {
+        let (f, s) = async_flag();
+        let mut handles = Vec::new();
+
+        for _ in 0..100 {
+            let mut cloned_s = s.clone();
+            let handle = tokio::spawn(async move {
+                (&mut cloned_s).await;
+                assert_eq!(cloned_s.is_marked(), true);
+            });
+            handles.push(handle);
+        }
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        f.mark();
+
+        for handle in handles {
+            handle.await.unwrap();
         }
     }
 }

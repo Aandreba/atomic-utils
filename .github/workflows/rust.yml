@@ -12,14 +12,22 @@ env:
 jobs:
   miri:
     runs-on: ubuntu-latest
+    env:
+      RUST_BACKTRACE: "1"
+      MIRIFLAGS: "-Zmiri-disable-isolation"
+      RUST_TEST_TIME_UNIT: "30s"
+      RUST_TEST_TIME_INTEGRATION: "30s"
+      RUST_TEST_TIME_DOCTEST: "10s"
     steps:
       - name: Add miri component to toolchain
         run: rustup component add miri
-      - name: Run miri
-        env:
-          RUST_BACKTRACE: "1"
-          MIRIFLAGS: "-Zmiri-disable-isolation"
-        run: cargo miri test
+      - run: cargo miri test --no-default-features
+      - run: cargo miri test --no-default-features --features std
+      - run: cargo miri test --no-default-features --features alloc
+      - run: cargo +nightly miri test --no-default-features --features nightly
+      - run: cargo +nightly miri test --features alloc_api
+      - run: cargo miri test --features futures
+      - run: cargo miri test --features const
 
   check:
     runs-on: ubuntu-latest
@@ -37,6 +45,10 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    env:
+      RUST_TEST_TIME_UNIT: "10s"
+      RUST_TEST_TIME_INTEGRATION: "10s"
+      RUST_TEST_TIME_DOCTEST: "10s"
     steps:
       - uses: actions/checkout@v3
       - run: cargo test --no-default-features

@@ -3,6 +3,7 @@ name = "utils-atomics"
 description = "Various atomic utils"
 version = "1.0.0"
 edition = "2021"
+exclude = ["src/bin"]
 repository = "https://github.com/Aandreba/atomic-utils"
 keywords = ["atomic", "parallel", "thread", "async"]
 categories = ["no-std", "asynchronous", "concurrency", "rust-patterns"]

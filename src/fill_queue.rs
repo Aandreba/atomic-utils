@@ -516,10 +516,21 @@ mod tests {
         assert_eq!(chop_iter.next(), Some(1));
         assert_eq!(chop_iter.next(), None);
 
+        fill_queue.push(1);
+        fill_queue.push(2);
+        fill_queue.push(3);
+
+        let mut chop_iter = fill_queue.chop();
+        assert_eq!(chop_iter.next(), Some(3));
+        assert_eq!(chop_iter.next(), Some(2));
+        assert_eq!(chop_iter.next(), Some(1));
+        assert_eq!(chop_iter.next(), None);
+
         assert!(fill_queue.is_empty());
     }
 
-    #[cfg(miri)]
+    #[cfg(feature = "std")]
+    #[cfg_attr(not(miri), ignore)]
     #[test]
     fn test_concurrent_fill_queue() {
         use std::sync::Arc;
