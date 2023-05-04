@@ -54,6 +54,8 @@ cfg_if::cfg_if! {
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "alloc")] {
+        // #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
+        // pub mod semaphore;
         #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
         pub mod fill_queue;
         #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
@@ -66,8 +68,8 @@ cfg_if::cfg_if! {
         pub mod notify;
         #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
         pub mod cell;
-        #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
-        pub mod arc_cell;
+        // #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
+        // pub mod arc_cell;
         pub(crate) mod locks;
 
         #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]

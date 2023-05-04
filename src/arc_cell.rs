@@ -1,81 +1,183 @@
-use crate::{InnerAtomicFlag, FALSE};
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicPtr, Ordering};
 
-#[derive(Debug)]
-pub struct ArcCell<T> {
-    inner: AtomicPtr<T>,
-    clone_lock: InnerAtomicFlag,
-}
-
-impl<T> ArcCell<T> {
-    #[inline]
-    pub fn new(t: impl Into<Option<T>>) -> Self {
-        Self::new_arced(t.into().map(Arc::new))
-    }
-
-    #[inline]
-    pub fn new_arced(t: impl Into<Option<Arc<T>>>) -> Self {
-        match t.into() {
-            Some(t) => Self {
-                inner: AtomicPtr::new(Arc::into_raw(t).cast_mut()),
-                clone_lock: InnerAtomicFlag::new(FALSE),
-            },
-            None => Self {
-                inner: AtomicPtr::new(core::ptr::null_mut()),
-                clone_lock: InnerAtomicFlag::new(FALSE),
-            },
+cfg_if::cfg_if! {
+    if #[cfg(feature = "std")] {
+        #[derive(Debug)]
+        pub struct ArcCell<T> {
+            inner: std::sync::RwLock<AtomicPtr<T>>,
         }
-    }
 
-    #[inline]
-    fn wait_for_clone(&self) {}
+        impl<T> ArcCell<T> {
+            #[inline]
+            pub fn new(t: impl Into<Option<T>>) -> Self {
+                Self::new_arced(t.into().map(Arc::new))
+            }
 
-    #[inline]
-    pub fn replace(&self, new: impl Into<Option<T>>) -> Option<Arc<T>> {
-        self.replace_arced(new.into().map(Arc::new))
-    }
+            #[inline]
+            pub fn new_arced(t: impl Into<Option<Arc<T>>>) -> Self {
+                match t.into() {
+                    Some(t) => Self {
+                        inner: std::sync::RwLock::new(AtomicPtr::new(Arc::into_raw(t).cast_mut())),
+                    },
+                    None => Self {
+                        inner: std::sync::RwLock::new(AtomicPtr::new(core::ptr::null_mut())),
+                    },
+                }
+            }
 
-    #[inline]
-    pub fn take(&self) -> Option<Arc<T>> {
-        self.replace_arced(None)
-    }
+            #[inline]
+            pub fn replace(&self, new: impl Into<Option<T>>) -> Option<Arc<T>> {
+                self.replace_arced(new.into().map(Arc::new))
+            }
 
-    #[inline]
-    pub fn replace_arced(&self, new: impl Into<Option<Arc<T>>>) -> Option<Arc<T>> {
-        let new = match new.into() {
-            Some(new) => Arc::into_raw(new).cast_mut(),
-            None => core::ptr::null_mut(),
-        };
+            #[inline]
+            pub fn take(&self) -> Option<Arc<T>> {
+                self.replace_arced(None)
+            }
 
-        let prev = self.inner.swap(new, Ordering::AcqRel);
-        if prev.is_null() {
-            return None;
-        }
-        return unsafe { Some(Arc::from_raw(prev)) };
-    }
-}
+            #[inline]
+            pub fn replace_arced(&self, new: impl Into<Option<Arc<T>>>) -> Option<Arc<T>> {
+                let new = match new.into() {
+                    Some(new) => Arc::into_raw(new).cast_mut(),
+                    None => core::ptr::null_mut(),
+                };
 
-impl<T> ArcCell<T> {
-    #[inline]
-    pub fn is_some(&self) -> bool {
-        return !self.is_none();
-    }
+                let inner = match self.inner.read() {
+                    Ok(x) => x,
+                    Err(e) => e.into_inner()
+                };
 
-    #[inline]
-    pub fn is_none(&self) -> bool {
-        return self.inner.load(Ordering::Relaxed).is_null();
-    }
-}
+                let prev = inner.swap(new, Ordering::AcqRel);
+                drop(inner);
 
-impl<T> Drop for ArcCell<T> {
-    fn drop(&mut self) {
-        unsafe {
-            let ptr = *self.inner.get_mut();
-            if !ptr.is_null() {
-                let _ = Arc::from_raw(ptr);
+                if prev.is_null() {
+                    return None;
+                }
+
+                return unsafe { Some(Arc::from_raw(prev)) };
             }
         }
+
+        impl<T> ArcCell<T> {
+            #[inline]
+            pub fn is_some(&self) -> bool {
+                return !self.is_none();
+            }
+
+            #[inline]
+            pub fn is_none(&self) -> bool {
+                let inner = match self.inner.read() {
+                    Ok(x) => x,
+                    Err(e) => e.into_inner()
+                };
+                return inner.load(Ordering::Relaxed).is_null();
+            }
+        }
+
+        #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
+        impl<T> Clone for ArcCell<T> {
+            fn clone(&self) -> Self {
+                let mut inner = match self.inner.write() {
+                    Ok(x) => x,
+                    Err(e) => e.into_inner()
+                };
+
+                let ptr = *inner.get_mut();
+                if !ptr.is_null() {  }
+                drop(inner);
+
+                let res = Self {
+                    inner: self.inner.clone(),
+                    clone_lock: std::sync::RwLock::new(()),
+                };
+                drop(guard);
+                return res;
+            }
+        }
+
+        impl<T> Drop for ArcCell<T> {
+            fn drop(&mut self) {
+                unsafe {
+                    let ptr = *self.inner.get_mut();
+                    if !ptr.is_null() {
+                        let _ = Arc::from_raw(ptr);
+                    }
+                }
+            }
+        }
+    } else {
+        #[derive(Debug)]
+        pub struct ArcCell<T> {
+            inner: AtomicPtr<T>,
+        }
+
+        impl<T> ArcCell<T> {
+            #[inline]
+            pub fn new(t: impl Into<Option<T>>) -> Self {
+                Self::new_arced(t.into().map(Arc::new))
+            }
+
+            #[inline]
+            pub fn new_arced(t: impl Into<Option<Arc<T>>>) -> Self {
+                match t.into() {
+                    Some(t) => Self {
+                        inner: AtomicPtr::new(Arc::into_raw(t).cast_mut()),
+                    },
+                    None => Self {
+                        inner: AtomicPtr::new(core::ptr::null_mut()),
+                    },
+                }
+            }
+
+            #[inline]
+            pub fn replace(&self, new: impl Into<Option<T>>) -> Option<Arc<T>> {
+                self.replace_arced(new.into().map(Arc::new))
+            }
+
+            #[inline]
+            pub fn take(&self) -> Option<Arc<T>> {
+                self.replace_arced(None)
+            }
+
+            #[inline]
+            pub fn replace_arced(&self, new: impl Into<Option<Arc<T>>>) -> Option<Arc<T>> {
+                let new = match new.into() {
+                    Some(new) => Arc::into_raw(new).cast_mut(),
+                    None => core::ptr::null_mut(),
+                };
+
+                let prev = self.inner.swap(new, Ordering::AcqRel);
+                if prev.is_null() {
+                    return None;
+                }
+                return unsafe { Some(Arc::from_raw(prev)) };
+            }
+        }
+
+        impl<T> ArcCell<T> {
+            #[inline]
+            pub fn is_some(&self) -> bool {
+                return !self.is_none();
+            }
+
+            #[inline]
+            pub fn is_none(&self) -> bool {
+                return self.inner.load(Ordering::Relaxed).is_null();
+            }
+        }
+
+        impl<T> Drop for ArcCell<T> {
+            fn drop(&mut self) {
+                unsafe {
+                    let ptr = *self.inner.get_mut();
+                    if !ptr.is_null() {
+                        let _ = Arc::from_raw(ptr);
+                    }
+                }
+            }
+        }
+
     }
 }
 
