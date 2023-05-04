@@ -256,7 +256,7 @@ mod tests {
         drop(listener);
     }
 
-    #[cfg_attr(not(miri), ignore)]
+    #[cfg(miri)]
     #[test]
     fn test_multi_threaded() {
         use std::sync::{Arc, Barrier};

@@ -1,7 +1,7 @@
 .PHONY: coverage
 
 doc:
-	cargo +nightly rustdoc --open --all-features -- --cfg docsrs
+	cargo +nightly rustdoc --lib --open --all-features -- --cfg docsrs
 
 check:
 	rustup component add clippy
@@ -35,7 +35,7 @@ test: check
 coverage:
 	rustup component add llvm-tools-preview
 	cargo install grcov
-	rm -r coverage/*
-	mkdir tmp
-	LLVM_PROFILE_FILE="coverage/tmp/%p-%m.profraw" RUSTFLAGS="-Cinstrument-coverage" cargo test
+	rm -rfd coverage/*
+	mkdir -p coverage/tmp
+	LLVM_PROFILE_FILE="coverage/tmp/%p-%m.profraw" RUSTFLAGS="-Cinstrument-coverage" cargo +nightly test --all-features
 	grcov ./coverage -s . --binary-path ./target/debug/ -t html,markdown --branch --ignore-not-existing -o ./coverage

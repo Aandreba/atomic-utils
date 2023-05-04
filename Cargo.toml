@@ -14,7 +14,6 @@ license = "MIT"
 default = ["std"]
 std = [
     "alloc",
-    "libc/std",
     "crossbeam/std",
     "bytemuck/extern_crate_std",
     "num-traits/std",
@@ -42,7 +41,6 @@ futures = { version = "0.3.24", default-features = false, optional = true }
 docfg = "0.1.0"
 static_assertions = "1.1.0"
 pin-project-lite = "0.2.9"
-libc = { version = "0.2.142", default-features = false }
 
 [dev-dependencies]
 criterion = "0.4.0"

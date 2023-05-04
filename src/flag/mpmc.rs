@@ -4,6 +4,7 @@ use crate::{
 };
 use alloc::sync::{Arc, Weak};
 use core::mem::ManuallyDrop;
+use docfg::docfg;
 
 /// A flag type that will be completed when all its references have been dropped or marked.
 ///
@@ -41,7 +42,7 @@ impl Flag {
     #[inline]
     pub fn mark(self) {}
 
-    /// Drops the flag without marking it as completed.
+    /// Drops the flag without **notifying** it as completed.
     /// This method may leak memory.
     #[inline]
     pub fn silent_drop(self) {
@@ -52,7 +53,7 @@ impl Flag {
 }
 
 impl Subscribe {
-    // Blocks the current thread until the flag gets marked.
+    /// Blocks the current thread until the flag gets marked.
     #[inline]
     pub fn wait(self) {
         if let Some(queue) = self.inner.upgrade() {
@@ -60,6 +61,18 @@ impl Subscribe {
             queue.0.push(waker);
             drop(queue);
             sub.wait()
+        }
+    }
+
+    /// Blocks the current thread until the flag gets marked or the timeout expires.
+    #[docfg(feature = "std")]
+    #[inline]
+    pub fn wait_timeout(self, dur: core::time::Duration) {
+        if let Some(queue) = self.inner.upgrade() {
+            let (waker, sub) = lock();
+            queue.0.push(waker);
+            drop(queue);
+            sub.wait_timeout(dur);
         }
     }
 }
@@ -140,7 +153,7 @@ cfg_if::cfg_if! {
                 }
             }
 
-            /// Drops the flag without marking it as completed.
+            /// Drops the flag without **notifying** it as completed.
             /// This method may leak memory.
             #[inline]
             pub fn silent_drop (self) {
@@ -197,7 +210,6 @@ cfg_if::cfg_if! {
             }
         }
 
-        #[repr(transparent)]
         #[derive(Debug)]
         struct AsyncFlagQueue (pub FillQueue<Waker>);
 
@@ -222,8 +234,10 @@ cfg_if::cfg_if! {
 #[cfg(all(feature = "std", test))]
 mod tests {
     use super::flag;
+    use super::Flag;
     use core::time::Duration;
     use std::thread;
+    use std::time::Instant;
 
     #[test]
     fn test_normal_conditions() {
@@ -233,6 +247,8 @@ mod tests {
 
         // Test waiting for the flag.
         let (f, s) = flag();
+        let f = unsafe { Flag::from_raw(Flag::into_raw(f)) };
+
         thread::spawn(move || {
             thread::sleep(Duration::from_millis(100));
             f.mark();
@@ -241,7 +257,24 @@ mod tests {
         s.wait();
     }
 
-    #[cfg_attr(not(miri), ignore)]
+    #[test]
+    fn test_silent_drop() {
+        let (f, s) = flag();
+
+        let handle = thread::spawn(move || {
+            let now = Instant::now();
+            s.wait_timeout(Duration::from_millis(200));
+            return now.elapsed();
+        });
+
+        std::thread::sleep(Duration::from_millis(100));
+        f.silent_drop();
+
+        let time = handle.join().unwrap();
+        assert!(time >= Duration::from_millis(200), "{time:?}");
+    }
+
+    #[cfg(miri)]
     #[test]
     fn test_stressed_conditions() {
         let mut handles = Vec::new();
@@ -274,8 +307,9 @@ mod tests {
 #[cfg(all(feature = "futures", test))]
 #[cfg_attr(miri, ignore)]
 mod async_tests {
-    use super::async_flag;
+    use super::{async_flag, AsyncFlag};
     use core::time::Duration;
+    use std::time::Instant;
 
     #[tokio::test]
     async fn test_async_normal_conditions() {
@@ -288,6 +322,7 @@ mod async_tests {
 
         // Test waiting for the flag.
         let (f, mut s) = async_flag();
+        let f = unsafe { AsyncFlag::from_raw(AsyncFlag::into_raw(f)) };
 
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -296,6 +331,27 @@ mod async_tests {
 
         (&mut s).await;
         assert_eq!(s.is_marked(), true);
+    }
+
+    #[tokio::test]
+    async fn test_silent_drop() {
+        let (f, s) = async_flag();
+
+        let handle = tokio::spawn(tokio::time::timeout(
+            Duration::from_millis(200),
+            async move {
+                let now = Instant::now();
+                s.await;
+                now.elapsed()
+            },
+        ));
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        f.silent_drop();
+
+        match handle.await.unwrap() {
+            Ok(t) if t < Duration::from_millis(200) => panic!("{t:?}"),
+            _ => {}
+        }
     }
 
     #[tokio::test]

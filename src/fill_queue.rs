@@ -530,7 +530,7 @@ mod tests {
     }
 
     #[cfg(feature = "std")]
-    #[cfg_attr(not(miri), ignore)]
+    #[cfg(miri)]
     #[test]
     fn test_concurrent_fill_queue() {
         use std::sync::Arc;

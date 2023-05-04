@@ -1,6 +1,7 @@
 use crate::locks::{lock, Lock};
 use alloc::sync::{Arc, Weak};
 use core::{cell::UnsafeCell, fmt::Debug};
+use docfg::docfg;
 
 /// Creates a new pair of [`Flag`] and [`Subscribe`]
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
@@ -51,7 +52,7 @@ impl Flag {
     #[inline]
     pub fn mark(self) {}
 
-    /// Drops the flag without marking it as completed.
+    /// Drops the flag without **notifying** it as completed.
     /// This method may leak memory.
     #[inline]
     pub fn silent_drop(self) {
@@ -78,6 +79,18 @@ impl Subscribe {
             unsafe { *queue.waker.get() = Some(lock) }
             drop(queue);
             sub.wait();
+        }
+    }
+
+    // Blocks the current thread until the flag gets fully marked or the timeout expires
+    #[docfg(feature = "std")]
+    #[inline]
+    pub fn wait_timeout(self, dur: core::time::Duration) {
+        if let Some(queue) = self.inner.upgrade() {
+            let (lock, sub) = lock();
+            unsafe { *queue.waker.get() = Some(lock) }
+            drop(queue);
+            sub.wait_timeout(dur);
         }
     }
 }
@@ -223,5 +236,129 @@ cfg_if::cfg_if! {
 
         unsafe impl Send for AsyncFlagWaker where Option<Waker>: Send {}
         unsafe impl Sync for AsyncFlagWaker where Option<Waker>: Sync {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[cfg(feature = "std")]
+    use std::thread;
+
+    #[test]
+    fn test_flag_creation() {
+        let (flag, subscribe) = flag();
+        assert!(!subscribe.is_marked());
+        drop(flag);
+    }
+
+    #[test]
+    fn test_flag_mark() {
+        let (flag, subscribe) = flag();
+        flag.mark();
+        assert!(subscribe.is_marked());
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn test_flag_silent_drop() {
+        use core::time::Duration;
+        use std::time::Instant;
+
+        let (flag, subscribe) = flag();
+
+        let handle = thread::spawn(move || {
+            thread::sleep(std::time::Duration::from_millis(100));
+            flag.silent_drop();
+        });
+
+        let now = Instant::now();
+        subscribe.wait_timeout(std::time::Duration::from_millis(200));
+        let elapsed = now.elapsed();
+
+        handle.join().unwrap();
+        assert!(elapsed >= Duration::from_millis(200), "{elapsed:?}");
+    }
+
+    #[test]
+    fn test_subscribe_wait() {
+        let (flag, subscribe) = flag();
+
+        let handle = thread::spawn(move || {
+            thread::sleep(std::time::Duration::from_millis(100));
+            flag.mark();
+        });
+
+        subscribe.wait();
+        handle.join().unwrap();
+    }
+
+    #[cfg(miri)]
+    #[test]
+    fn test_flag_stress() {
+        const THREADS: usize = 10;
+        const ITERATIONS: usize = 100;
+
+        for _ in 0..ITERATIONS {
+            let (flag, subscribe) = flag();
+            let mut handles = Vec::with_capacity(THREADS);
+
+            for _ in 0..THREADS {
+                let flag_clone = flag.clone();
+                let handle = std::thread::spawn(move || {
+                    flag_clone.mark();
+                });
+                handles.push(handle);
+            }
+
+            subscribe.wait();
+
+            for handle in handles {
+                handle.join().unwrap();
+            }
+        }
+    }
+
+    #[cfg(feature = "futures")]
+    mod async_tests {
+        use super::*;
+
+        #[test]
+        fn test_async_flag_creation() {
+            let (async_flag, async_subscribe) = async_flag();
+            assert!(!async_subscribe.is_marked());
+            drop(async_flag);
+        }
+
+        #[test]
+        fn test_async_flag_mark() {
+            let (async_flag, async_subscribe) = async_flag();
+            async_flag.mark();
+            assert!(async_subscribe.is_marked());
+        }
+
+        #[test]
+        fn test_async_flag_silent_drop() {
+            let (async_flag, async_subscribe) = async_flag();
+            async_flag.silent_drop();
+            assert!(!async_subscribe.is_marked());
+        }
+
+        #[tokio::test]
+        async fn test_async_subscribe_wait() {
+            let (async_flag, async_subscribe) = async_flag();
+            let async_flag_clone = async_flag.clone();
+
+            let handle = tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                async_flag_clone.mark();
+            });
+
+            // Wait for the async_flag_clone to be marked
+            handle.await.unwrap();
+
+            // Wait for the async_subscribe to complete
+            async_subscribe.await;
+        }
     }
 }

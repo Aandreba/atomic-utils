@@ -9,7 +9,7 @@ cfg_if::cfg_if! {
         pub struct Lock (std::thread::Thread);
 
         #[derive(Debug)]
-        pub struct LockSub (#[cfg(not(feature = "nightly"))] PhantomData<*mut ()>);
+        pub struct LockSub ((), #[cfg(not(feature = "nightly"))] PhantomData<*mut ()>);
 
         impl Lock {
             #[inline]
@@ -37,6 +37,13 @@ cfg_if::cfg_if! {
             pub fn wait (self) {
                 std::thread::park();
             }
+
+            #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
+            #[allow(clippy::unused_self)]
+            #[inline]
+            pub fn wait_timeout (self, dur: core::time::Duration) {
+                std::thread::park_timeout(dur);
+            }
         }
 
         impl Drop for Lock {
@@ -48,7 +55,7 @@ cfg_if::cfg_if! {
 
         #[inline]
         pub fn lock () -> (Lock, LockSub) {
-            return (Lock(std::thread::current()), LockSub(#[cfg(not(feature = "nightly"))] PhantomData))
+            return (Lock(std::thread::current()), LockSub((), #[cfg(not(feature = "nightly"))] PhantomData))
         }
     } else {
         use alloc::sync::Arc;

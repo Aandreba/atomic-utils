@@ -70,7 +70,9 @@ cfg_if::cfg_if! {
         pub mod cell;
         // #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
         // pub mod arc_cell;
-        pub(crate) mod locks;
+        /// Blocking locks
+        #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
+        pub mod locks;
 
         #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
         pub use fill_queue::FillQueue;
