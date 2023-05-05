@@ -37,8 +37,8 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - run: rustup install nightly
-      - name: Add clippy component to toolchain
-        run: rustup component add clippy
+      - run: rustup component add clippy
+      - run: rustup component add clippy --toolchain nightly
       - run: cargo clippy --no-default-features
       - run: cargo clippy --no-default-features --features std
       - run: cargo clippy --no-default-features --features alloc
