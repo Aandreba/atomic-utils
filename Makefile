@@ -1,6 +1,7 @@
 .PHONY: coverage
 
 doc:
+	cargo test --doc --all-features
 	cargo +nightly rustdoc --lib --open --all-features -- --cfg docsrs
 
 check:

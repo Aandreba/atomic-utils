@@ -71,7 +71,7 @@ impl Subscribe {
         return self.inner.strong_count() == 0;
     }
 
-    // Blocks the current thread until the flag gets fully marked.
+    /// Blocks the current thread until the flag gets fully marked.
     #[inline]
     pub fn wait(self) {
         if let Some(queue) = self.inner.upgrade() {
@@ -82,16 +82,24 @@ impl Subscribe {
         }
     }
 
-    // Blocks the current thread until the flag gets fully marked or the timeout expires
+    /// Blocks the current thread until the flag gets fully marked or the timeout expires.
+    ///
+    /// # Errors
+    /// This method returns an error if the wait didn't conclude before the specified duration
     #[docfg(feature = "std")]
     #[inline]
-    pub fn wait_timeout(self, dur: core::time::Duration) {
+    pub fn wait_timeout(&self, dur: core::time::Duration) -> Result<(), crate::Timeout> {
         if let Some(queue) = self.inner.upgrade() {
             let (lock, sub) = lock();
             unsafe { *queue.waker.get() = Some(lock) }
             drop(queue);
             sub.wait_timeout(dur);
+            return match self.is_marked() {
+                true => Ok(()),
+                false => Err(crate::Timeout),
+            };
         }
+        return Ok(());
     }
 }
 
@@ -273,7 +281,7 @@ mod tests {
         });
 
         let now = Instant::now();
-        subscribe.wait_timeout(std::time::Duration::from_millis(200));
+        let _ = subscribe.wait_timeout(std::time::Duration::from_millis(200));
         let elapsed = now.elapsed();
 
         handle.join().unwrap();
@@ -312,6 +320,7 @@ mod tests {
                 handles.push(handle);
             }
 
+            drop(flag);
             subscribe.wait();
 
             for handle in handles {

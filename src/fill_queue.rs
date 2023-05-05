@@ -516,9 +516,9 @@ mod tests {
         assert_eq!(chop_iter.next(), Some(1));
         assert_eq!(chop_iter.next(), None);
 
-        fill_queue.push(1);
-        fill_queue.push(2);
-        fill_queue.push(3);
+        fill_queue.push_mut(1);
+        fill_queue.push_mut(2);
+        fill_queue.push_mut(3);
 
         let mut chop_iter = fill_queue.chop();
         assert_eq!(chop_iter.next(), Some(3));
@@ -530,30 +530,25 @@ mod tests {
     }
 
     #[cfg(feature = "std")]
-    #[cfg(miri)]
     #[test]
     fn test_concurrent_fill_queue() {
-        use std::sync::Arc;
-        use std::thread;
+        use core::sync::atomic::{AtomicUsize, Ordering};
 
-        let fill_queue = Arc::new(FillQueue::new());
-        let mut handles = Vec::new();
+        let fill_queue = FillQueue::new();
+        let mut count = AtomicUsize::new(0);
 
-        for _ in 0..10 {
-            let fill_queue_clone = Arc::clone(&fill_queue);
-            let handle = thread::spawn(move || {
-                for i in 1..=10 {
-                    fill_queue_clone.push(i);
-                }
-            });
-            handles.push(handle);
-        }
+        std::thread::scope(|s| {
+            for _ in 0..10 {
+                s.spawn(|| {
+                    for i in 1..=10 {
+                        fill_queue.push(i);
+                    }
 
-        for handle in handles {
-            handle.join().unwrap();
-        }
+                    count.fetch_add(fill_queue.chop().count(), Ordering::Relaxed);
+                });
+            }
+        });
 
-        let count = fill_queue.chop().count();
-        assert_eq!(count, 100);
+        assert_eq!(*count.get_mut(), 100);
     }
 }

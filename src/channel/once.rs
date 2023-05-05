@@ -1,6 +1,7 @@
 use crate::flag::mpsc::*;
 use alloc::sync::{Arc, Weak};
 use core::cell::UnsafeCell;
+use docfg::docfg;
 
 struct Inner<T> {
     v: UnsafeCell<Option<T>>,
@@ -21,7 +22,7 @@ pub struct Receiver<T> {
 }
 
 impl<T> Sender<T> {
-    /// Sends the value through the channel.
+    /// Sends the value through the channel. If the channel is already closed, the error will be ignored.
     #[inline]
     pub fn send(self, t: T) {
         let _ = self.try_send(t);
@@ -48,6 +49,18 @@ impl<T> Receiver<T> {
     pub fn wait(self) -> Option<T> {
         self.sub.wait();
         return unsafe { &mut *self.inner.v.get() }.take();
+    }
+
+    /// Blocks the current thread until the value is received.
+    /// If [`Sender`] is dropped before it sends the value, this method returns `None`.
+    ///
+    /// # Errors
+    /// This method returns an error if the wait didn't conclude before the specified duration
+    #[docfg(feature = "std")]
+    #[inline]
+    pub fn wait_timeout(&self, dur: core::time::Duration) -> Result<Option<T>, crate::Timeout> {
+        self.sub.wait_timeout(dur)?;
+        return Ok(unsafe { &mut *self.inner.v.get() }.take());
     }
 }
 
@@ -141,6 +154,116 @@ cfg_if::cfg_if! {
                 },
                 AsyncReceiver { inner, sub },
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use core::time::Duration;
+
+    use super::*;
+
+    #[test]
+    fn test_send_receive() {
+        let (sender, receiver) = channel::<i32>();
+
+        sender.send(42);
+        let result = receiver.wait();
+
+        assert_eq!(result, Some(42));
+    }
+
+    #[test]
+    fn test_sender_dropped() {
+        let (sender, receiver) = channel::<i32>();
+
+        drop(sender);
+        let result = receiver.wait();
+
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_try_send() {
+        let (sender, receiver) = channel::<i32>();
+
+        let result = sender.try_send(42);
+        assert!(result.is_ok());
+
+        let value = receiver.wait();
+        assert_eq!(value, Some(42));
+    }
+
+    #[test]
+    fn test_try_send_after_used() {
+        let (sender, receiver) = channel::<i32>();
+        drop(receiver);
+        let result = sender.try_send(43);
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), 43);
+    }
+
+    #[docfg(feature = "std")]
+    #[test]
+    fn test_try_receive_timeout() {
+        let (sender, receiver) = channel::<i32>();
+
+        let wait = std::thread::spawn(move || receiver.wait_timeout(Duration::from_millis(100)));
+        std::thread::sleep(Duration::from_millis(200));
+        sender.send(2);
+
+        assert!(wait.join().unwrap().is_err())
+    }
+
+    #[cfg(feature = "futures")]
+    mod async_tests {
+        use super::*;
+        use tokio::runtime::Runtime;
+
+        #[test]
+        fn test_async_send_receive() {
+            let rt = Runtime::new().unwrap();
+            let (async_sender, async_receiver) = async_channel::<i32>();
+
+            async_sender.send(42);
+            let result = rt.block_on(async_receiver);
+
+            assert_eq!(result, Some(42));
+        }
+
+        #[test]
+        fn test_async_sender_dropped() {
+            let rt = Runtime::new().unwrap();
+            let (async_sender, async_receiver) = async_channel::<i32>();
+
+            drop(async_sender);
+            let result = rt.block_on(async_receiver);
+
+            assert_eq!(result, None);
+        }
+
+        #[test]
+        fn test_async_try_send() {
+            let rt = Runtime::new().unwrap();
+            let (async_sender, async_receiver) = async_channel::<i32>();
+
+            let result = async_sender.try_send(42);
+            assert!(result.is_ok());
+
+            let value = rt.block_on(async_receiver);
+            assert_eq!(value, Some(42));
+        }
+
+        #[test]
+        fn test_async_try_send_after_used() {
+            let rt = Runtime::new().unwrap();
+            let (async_sender, async_receiver) = async_channel::<i32>();
+
+            async_sender.send(42);
+            let value = rt.block_on(async_receiver);
+            assert_eq!(value, Some(42));
         }
     }
 }

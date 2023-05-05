@@ -102,7 +102,6 @@ mod tests {
     }
 
     #[cfg(feature = "std")]
-    #[cfg(miri)]
     #[test]
     fn test_stressed_conditions() {
         use alloc::vec::Vec;

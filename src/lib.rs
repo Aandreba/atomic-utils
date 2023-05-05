@@ -8,6 +8,7 @@
 #![allow(clippy::module_name_repetitions)]
 #![allow(clippy::wildcard_imports)]
 #![allow(clippy::explicit_deref_methods)]
+#![allow(clippy::match_bool)]
 #![cfg_attr(test, allow(clippy::bool_assert_comparison))]
 /* */
 #![cfg_attr(feature = "nightly", feature(int_roundings, negative_impls, c_size_t))]
@@ -16,6 +17,10 @@
 #![cfg_attr(feature = "alloc_api", feature(allocator_api))]
 #![cfg_attr(feature = "const", feature(const_trait_impl))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+
+use core::fmt::Display;
+
+use docfg::docfg;
 
 #[cfg(feature = "alloc")]
 pub(crate) extern crate alloc;
@@ -66,14 +71,15 @@ cfg_if::cfg_if! {
         pub mod channel;
         #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
         pub mod notify;
-        #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
-        pub mod cell;
+        mod cell;
         // #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
         // pub mod arc_cell;
         /// Blocking locks
         #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
         pub mod locks;
 
+        #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
+        pub use cell::AtomicCell;
         #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
         pub use fill_queue::FillQueue;
         #[docfg::docfg(feature = "alloc")]
@@ -114,6 +120,23 @@ cfg_if::cfg_if! {
 
 pub(crate) const TRUE: InnerFlag = 1;
 pub(crate) const FALSE: InnerFlag = 0;
+
+/// Error returned when a timeout ocurrs before the main operation completes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct Timeout;
+
+impl Display for Timeout {
+    #[inline]
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "The main operation timed out before it could be completed"
+        )
+    }
+}
+
+#[docfg(feature = "std")]
+impl std::error::Error for Timeout {}
 
 #[allow(unused)]
 #[inline]

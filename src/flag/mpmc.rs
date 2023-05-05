@@ -53,6 +53,11 @@ impl Flag {
 }
 
 impl Subscribe {
+    #[inline]
+    pub fn is_marked(&self) -> bool {
+        return self.inner.strong_count() == 0;
+    }
+
     /// Blocks the current thread until the flag gets marked.
     #[inline]
     pub fn wait(self) {
@@ -65,15 +70,23 @@ impl Subscribe {
     }
 
     /// Blocks the current thread until the flag gets marked or the timeout expires.
+    ///
+    /// # Errors
+    /// This method returns an error if the wait didn't conclude before the specified duration
     #[docfg(feature = "std")]
     #[inline]
-    pub fn wait_timeout(self, dur: core::time::Duration) {
+    pub fn wait_timeout(self, dur: core::time::Duration) -> Result<(), crate::Timeout> {
         if let Some(queue) = self.inner.upgrade() {
             let (waker, sub) = lock();
             queue.0.push(waker);
             drop(queue);
             sub.wait_timeout(dur);
+            return match self.is_marked() {
+                true => Ok(()),
+                false => Err(crate::Timeout),
+            };
         }
+        return Ok(());
     }
 }
 
@@ -237,7 +250,6 @@ mod tests {
     use super::Flag;
     use core::time::Duration;
     use std::thread;
-    use std::time::Instant;
 
     #[test]
     fn test_normal_conditions() {
@@ -261,20 +273,15 @@ mod tests {
     fn test_silent_drop() {
         let (f, s) = flag();
 
-        let handle = thread::spawn(move || {
-            let now = Instant::now();
-            s.wait_timeout(Duration::from_millis(200));
-            return now.elapsed();
-        });
+        let handle = thread::spawn(move || s.wait_timeout(Duration::from_millis(100)));
 
-        std::thread::sleep(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(200));
         f.silent_drop();
 
         let time = handle.join().unwrap();
-        assert!(time >= Duration::from_millis(200), "{time:?}");
+        assert!(time.is_err());
     }
 
-    #[cfg(miri)]
     #[test]
     fn test_stressed_conditions() {
         let mut handles = Vec::new();
