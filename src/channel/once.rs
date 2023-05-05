@@ -25,7 +25,7 @@ impl<T> Sender<T> {
     /// Sends the value through the channel. If the channel is already closed, the error will be ignored.
     #[inline]
     pub fn send(self, t: T) {
-        let _ = self.try_send(t);
+        let _: Result<(), T> = self.try_send(t);
     }
 
     /// Attempts to send the value through the channel, returning `Ok` if successfull, and `Err(t)` otherwise.
@@ -103,7 +103,7 @@ cfg_if::cfg_if! {
             /// Sends the value through the channel.
             #[inline]
             pub fn send (self, t: T) {
-                let _ = self.try_send(t);
+                let _: Result<(), T> = self.try_send(t);
             }
 
             /// Attempts to send the value through the channel, returning `Ok` if successfull, and `Err(t)` otherwise.

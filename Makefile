@@ -12,7 +12,7 @@ check:
 	cargo +nightly clippy --no-default-features --features nightly -- -Dwarnings
 	cargo +nightly clippy --features alloc_api -- -Dwarnings
 	cargo clippy --features futures -- -Dwarnings
-	cargo clippy --features const -- -Dwarnings
+	cargo +nightly clippy --features const -- -Dwarnings
 
 miri:
 	rustup component add miri
@@ -21,7 +21,7 @@ miri:
 	RUST_BACKTRACE=1 MIRIFLAGS="-Zmiri-disable-isolation" cargo miri test --no-default-features --features alloc
 	RUST_BACKTRACE=1 MIRIFLAGS="-Zmiri-disable-isolation" cargo +nightly miri test --no-default-features --features nightly
 	RUST_BACKTRACE=1 MIRIFLAGS="-Zmiri-disable-isolation" cargo +nightly miri test --features alloc_api
-	RUST_BACKTRACE=1 MIRIFLAGS="-Zmiri-disable-isolation" cargo miri test --features const
+	RUST_BACKTRACE=1 MIRIFLAGS="-Zmiri-disable-isolation" cargo +nightly miri test --features const
 
 test: check
 	cargo test --no-default-features
@@ -30,7 +30,7 @@ test: check
 	cargo +nightly test --no-default-features --features nightly
 	cargo +nightly test --features alloc_api
 	cargo test --features futures
-	cargo test --features const
+	cargo +nightly test --features const
 
 coverage:
 	rustup component add llvm-tools-preview

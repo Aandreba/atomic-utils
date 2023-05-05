@@ -434,7 +434,7 @@ cfg_if::cfg_if! {
                 unsafe {
                     let ptr = *self.inner.get_mut();
                     if !ptr.is_null() {
-                        let _ = Box::from_raw(ptr);
+                        let _: Box<T> = Box::from_raw(ptr);
                     }
                 }
             }

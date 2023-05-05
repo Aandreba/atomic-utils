@@ -28,7 +28,7 @@ jobs:
       - run: cargo miri test --no-default-features --features alloc
       - run: cargo miri test --no-default-features --features nightly
       - run: cargo +nightly miri test --features alloc_api
-      - run: cargo miri test --features const
+      - run: cargo +nightly miri test --features const
 
   check:
     runs-on: ubuntu-latest
@@ -45,7 +45,7 @@ jobs:
       - run: cargo +nightly clippy --no-default-features --features nightly
       - run: cargo +nightly clippy --features alloc_api
       - run: cargo clippy --features futures
-      - run: cargo clippy --features const
+      - run: cargo +nightly clippy --features const
 
   test:
     runs-on: ubuntu-latest
@@ -63,4 +63,4 @@ jobs:
       - run: cargo +nightly test --no-default-features --features nightly
       - run: cargo +nightly test --features alloc_api
       - run: cargo test --features futures
-      - run: cargo test --features const
+      - run: cargo +nightly test --features const

@@ -72,7 +72,7 @@ impl Listener {
 
     #[inline]
     pub fn recv(&self) {
-        let _ = self.try_recv();
+        let _: bool = self.try_recv();
     }
 
     #[inline]

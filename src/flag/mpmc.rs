@@ -230,7 +230,7 @@ cfg_if::cfg_if! {
             #[inline]
             pub fn silent_drop (self) {
                 let mut this = ManuallyDrop::new(self);
-                let _ = this.0.chop_mut();
+                let _: crate::prelude::ChopIter<Waker> = this.0.chop_mut();
                 unsafe { core::ptr::drop_in_place(&mut this.0) }
             }
         }
