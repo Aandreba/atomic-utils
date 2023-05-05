@@ -1,8 +1,9 @@
 [package]
 name = "utils-atomics"
 description = "Various atomic utils"
-version = "0.5.1"
+version = "1.0.0"
 edition = "2021"
+exclude = ["src/bin"]
 repository = "https://github.com/Aandreba/atomic-utils"
 keywords = ["atomic", "parallel", "thread", "async"]
 categories = ["no-std", "asynchronous", "concurrency", "rust-patterns"]
@@ -10,13 +11,25 @@ license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
-default = ["std", "nightly"]
-std = ["alloc", "crossbeam/std", "bytemuck/extern_crate_std", "num-traits/std", "once_cell/std", "futures?/std"]
-alloc = ["crossbeam/alloc", "bytemuck/extern_crate_alloc", "once_cell/alloc", "futures?/alloc"]
+default = ["std"]
+std = [
+    "alloc",
+    "crossbeam/std",
+    "bytemuck/extern_crate_std",
+    "num-traits/std",
+    "once_cell/std",
+    "futures?/std",
+]
+alloc = [
+    "crossbeam/alloc",
+    "bytemuck/extern_crate_alloc",
+    "once_cell/alloc",
+    "futures?/alloc",
+]
 alloc_api = ["nightly", "alloc"]
 futures = ["dep:futures"]
 nightly = []
-const = []
+const = ["nightly"]
 
 [dependencies]
 cfg-if = "1"

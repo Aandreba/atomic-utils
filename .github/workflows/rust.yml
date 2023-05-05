@@ -2,30 +2,65 @@ name: Rust
 
 on:
   push:
-    branches: [ "master" ]
+    branches: ["master"]
   pull_request:
-    branches: [ "master" ]
+    branches: ["master", "dev"]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   miri:
+    runs-on: ubuntu-latest
+    env:
+      RUST_BACKTRACE: "1"
+      MIRIFLAGS: "-Zmiri-disable-isolation"
+      RUST_TEST_TIME_UNIT: "30s"
+      RUST_TEST_TIME_INTEGRATION: "30s"
+      RUST_TEST_TIME_DOCTEST: "10s"
     steps:
-    - env:
-      RUST_BACKTRACE: 1
-      
+      - uses: actions/checkout@v3
+      - run: rustup override set nightly
+      - name: Add miri component to toolchain
+        run: rustup component add miri
+      - run: cargo miri test --no-default-features
+      - run: cargo miri test --no-default-features --features std
+      - run: cargo miri test --no-default-features --features alloc
+      - run: cargo miri test --no-default-features --features nightly
+      - run: cargo +nightly miri test --features alloc_api
+      - run: cargo +nightly miri test --features const
 
   check:
     runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: "-Dwarnings"
     steps:
       - uses: actions/checkout@v3
+      - run: rustup install nightly
+      - run: rustup component add clippy
+      - run: rustup component add clippy --toolchain nightly
+      - run: cargo clippy --no-default-features
+      - run: cargo clippy --no-default-features --features std
+      - run: cargo clippy --no-default-features --features alloc
+      - run: cargo +nightly clippy --no-default-features --features nightly
+      - run: cargo +nightly clippy --features alloc_api
+      - run: cargo clippy --features futures
+      - run: cargo +nightly clippy --features const
 
-  build:
+  test:
     runs-on: ubuntu-latest
+    env:
+      RUST_TEST_TIME_UNIT: "30s"
+      RUST_TEST_TIME_INTEGRATION: "30s"
+      RUST_TEST_TIME_DOCTEST: "10s"
     steps:
-    - uses: actions/checkout@v3
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
+      - uses: actions/checkout@v3
+      - run: rustup install nightly
+      - run: cargo +nightly test --doc --all-features
+      - run: cargo test --no-default-features
+      - run: cargo test --no-default-features --features std
+      - run: cargo test --no-default-features --features alloc
+      - run: cargo +nightly test --no-default-features --features nightly
+      - run: cargo +nightly test --features alloc_api
+      - run: cargo test --features futures
+      - run: cargo +nightly test --features const
