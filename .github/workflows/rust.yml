@@ -19,13 +19,15 @@ jobs:
       RUST_TEST_TIME_INTEGRATION: "30s"
       RUST_TEST_TIME_DOCTEST: "10s"
     steps:
+      - uses: actions/checkout@v3
+      - run: rustup override set nightly
       - name: Add miri component to toolchain
         run: rustup component add miri
       - run: cargo miri test --no-default-features
       - run: cargo miri test --no-default-features --features std
       - run: cargo miri test --no-default-features --features alloc
-      - run: cargo +nightly miri test --no-default-features --features nightly
-      - run: cargo +nightly miri test --features alloc_api
+      - run: cargo miri test --no-default-features --features nightly
+      - run: cargo miri test --features alloc_api
       - run: cargo miri test --features const
 
   check:
