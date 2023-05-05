@@ -97,7 +97,7 @@ cfg_if::cfg_if! {
             /// use std::time::Instant;
             ///
             /// let (lock, lock_sub) = lock();
-            /// std::thread::spawn(move || {
+            /// let handle = std::thread::spawn(move || {
             ///     // Do some work with the shared resource
             ///     std::thread::sleep(Duration::from_secs(3));
             ///     lock.wake();
@@ -106,6 +106,7 @@ cfg_if::cfg_if! {
             /// let start = Instant::now();
             /// lock_sub.wait_timeout(Duration::from_secs(2));
             /// assert!(start.elapsed() >= Duration::from_secs(2));
+            /// handle.join().unwrap();
             /// ```
             #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
             #[allow(clippy::unused_self)]
@@ -180,7 +181,7 @@ cfg_if::cfg_if! {
             #[inline]
             pub fn into_raw (self) -> *mut () {
                 let this = ManuallyDrop::new(self);
-                return Arc::into_raw(core::ptr::read(&this.0)).cast_mut()
+                return unsafe { Arc::into_raw(core::ptr::read(&this.0)).cast_mut() }
             }
 
             /// Constructs a `Lock` from a raw mutable pointer.
@@ -211,13 +212,14 @@ cfg_if::cfg_if! {
             /// use utils_atomics::{Lock, lock};
             ///
             /// let (lock, lock_sub) = lock();
-            /// std::thread::spawn(move || {
+            /// let handle = std::thread::spawn(move || {
             ///     // Do some work with the shared resource
             ///     lock.wake();
             /// });
             ///
             /// // Do some work with the shared resource
             /// lock_sub.wait();
+            /// handle.join().unwrap();
             /// ```
             #[inline]
             pub fn wait (self) {

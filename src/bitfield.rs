@@ -181,7 +181,7 @@ cfg_if::cfg_if! {
             }
         }
     } else {
-        impl<T: AtomicInt> AtomicBitBox<T> where T::Primitive: BitFieldAble {
+        impl<T: HasAtomicInt> AtomicBitBox<T> where T: BitFieldAble {
             const BIT_SIZE: usize = 8 * core::mem::size_of::<T>();
 
             /// Returns the value of the bit at the specified index, or `None` if the index is out of bounds.
@@ -195,10 +195,10 @@ cfg_if::cfg_if! {
                     return None
                 }
 
-                let byte = unsafe { <[T]>::get_unchecked(&self.bits, byte) };
+                let byte = unsafe { <[T::AtomicInt]>::get_unchecked(&self.bits, byte) };
                 let v = byte.load(order);
-                let mask = T::Primitive::one() << idx;
-                return Some((v & mask) != T::Primitive::zero())
+                let mask = T::one() << idx;
+                return Some((v & mask) != T::zero())
             }
 
             /// Sets the value of the bit at the specified index and returns the previous value, or `None` if the index is out of bounds.
@@ -222,10 +222,10 @@ cfg_if::cfg_if! {
                     return None
                 }
 
-                let byte = unsafe { <[T]>::get_unchecked(&self.bits, byte) };
-                let mask = T::Primitive::one() << idx;
+                let byte = unsafe { <[T::AtomicInt]>::get_unchecked(&self.bits, byte) };
+                let mask = T::one() << idx;
                 let prev = byte.fetch_or(mask, order);
-                return Some((prev & mask) != T::Primitive::zero())
+                return Some((prev & mask) != T::zero())
             }
 
             /// Sets the bit at the specified index to `false` and returns the previous value, or `None` if the index is out of bounds.
@@ -240,12 +240,10 @@ cfg_if::cfg_if! {
                     return None
                 }
 
-                let byte = unsafe { <[T]>::get_unchecked(&self.bits, byte) };
-                let zero = T::Primitive::zero();
-                let mask = T::Primitive::one() << idx;
-
-                let prev = byte.fetch_and((!zero).wrapping_sub(&mask), order);
-                return Some((prev & mask) != zero)
+                let byte = unsafe { <[T::AtomicInt]>::get_unchecked(&self.bits, byte) };
+                let mask = T::one() << idx;
+                let prev = byte.fetch_and(!mask, order);
+                return Some((prev & mask) != T::zero())
             }
 
             #[inline]

@@ -302,7 +302,7 @@ mod tests {
         handle.join().unwrap();
     }
 
-    #[cfg(miri)]
+    #[cfg(feature = "std")]
     #[test]
     fn test_flag_stress() {
         const THREADS: usize = 10;

@@ -160,8 +160,6 @@ cfg_if::cfg_if! {
 
 #[cfg(test)]
 mod tests {
-    use core::time::Duration;
-
     use super::*;
 
     #[test]
@@ -210,8 +208,10 @@ mod tests {
     fn test_try_receive_timeout() {
         let (sender, receiver) = channel::<i32>();
 
-        let wait = std::thread::spawn(move || receiver.wait_timeout(Duration::from_millis(100)));
-        std::thread::sleep(Duration::from_millis(200));
+        let wait = std::thread::spawn(move || {
+            receiver.wait_timeout(core::time::Duration::from_millis(100))
+        });
+        std::thread::sleep(core::time::Duration::from_millis(200));
         sender.send(2);
 
         assert!(wait.join().unwrap().is_err())
