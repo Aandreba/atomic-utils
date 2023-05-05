@@ -111,6 +111,16 @@ pub trait AtomicMax<T = <Self as Atomic>::Primitive>: Atomic {
 }
 
 // MARKER TRAITS
+pub trait HasAtomicInt: HasAtomic {
+    type AtomicInt: AtomicInt<Primitive = Self>;
+}
+impl<T: HasAtomic> HasAtomicInt for T
+where
+    T::Atomic: AtomicInt<Primitive = T>,
+{
+    type AtomicInt = <T as HasAtomic>::Atomic;
+}
+
 pub trait AtomicNumOps<T = <Self as Atomic>::Primitive>:
     Atomic + AtomicAdd<T> + AtomicSub<T>
 {

@@ -36,12 +36,14 @@ macro_rules! flat_mod {
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "alloc_api")] {
+        #[doc(hidden)]
         pub use core::alloc::AllocError;
     } else {
         /// The `AllocError` error indicates an allocation failure
         /// that may be due to resource exhaustion or to
         /// something wrong when combining the given input arguments with this
         /// allocator.
+        #[doc(hidden)]
         #[derive(Copy, Clone, PartialEq, Eq, Debug)]
         pub struct AllocError;
 
@@ -63,8 +65,7 @@ cfg_if::cfg_if! {
         // pub mod semaphore;
         #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
         pub mod fill_queue;
-        #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
-        pub mod bitfield;
+        mod bitfield;
         #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
         pub mod flag;
         #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
@@ -74,16 +75,18 @@ cfg_if::cfg_if! {
         mod cell;
         // #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
         // pub mod arc_cell;
-        /// Blocking locks
-        #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
-        pub mod locks;
+        mod locks;
 
+        #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
+        pub use bitfield::AtomicBitBox;
         #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
         pub use cell::AtomicCell;
         #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
         pub use fill_queue::FillQueue;
-        #[docfg::docfg(feature = "alloc")]
-        pub use bitfield::AtomicBitBox;
+        #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
+        pub use locks::*;
+        #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
+        pub use bitfield::*;
     }
 }
 
