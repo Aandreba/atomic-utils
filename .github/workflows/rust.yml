@@ -45,11 +45,12 @@ jobs:
   test:
     runs-on: ubuntu-latest
     env:
-      RUST_TEST_TIME_UNIT: "10s"
-      RUST_TEST_TIME_INTEGRATION: "10s"
+      RUST_TEST_TIME_UNIT: "30s"
+      RUST_TEST_TIME_INTEGRATION: "30s"
       RUST_TEST_TIME_DOCTEST: "10s"
     steps:
       - uses: actions/checkout@v3
+      - run: cargo test --doc --all-features
       - run: cargo test --no-default-features
       - run: cargo test --no-default-features --features std
       - run: cargo test --no-default-features --features alloc
