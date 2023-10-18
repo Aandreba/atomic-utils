@@ -37,6 +37,16 @@ pub struct Listener {
 }
 
 impl Notify {
+    pub unsafe fn into_raw(self) -> *const () {
+        Arc::into_raw(self.inner).cast()
+    }
+
+    pub unsafe fn from_raw(ptr: *const ()) -> Self {
+        Self {
+            inner: Arc::from_raw(ptr.cast()),
+        }
+    }
+
     #[inline]
     pub fn listeners(&self) -> usize {
         return Arc::weak_count(&self.inner);
@@ -65,6 +75,16 @@ impl Notify {
 }
 
 impl Listener {
+    pub unsafe fn into_raw(self) -> *const () {
+        Weak::into_raw(self.inner).cast()
+    }
+
+    pub unsafe fn from_raw(ptr: *const ()) -> Self {
+        Self {
+            inner: Weak::from_raw(ptr.cast()),
+        }
+    }
+
     #[inline]
     pub fn listeners(&self) -> usize {
         return Weak::weak_count(&self.inner);
@@ -130,6 +150,16 @@ cfg_if::cfg_if! {
         }
 
         impl AsyncNotify {
+            pub unsafe fn into_raw(self) -> *const () {
+                Arc::into_raw(self.inner).cast()
+            }
+
+            pub unsafe fn from_raw(ptr: *const ()) -> Self {
+                Self {
+                    inner: Arc::from_raw(ptr.cast()),
+                }
+            }
+
             #[inline]
             pub fn listeners(&self) -> usize {
                 return Arc::weak_count(&self.inner);

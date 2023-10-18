@@ -1,7 +1,7 @@
 [package]
 name = "utils-atomics"
 description = "Various atomic utils"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 exclude = ["src/bin"]
 repository = "https://github.com/Aandreba/atomic-utils"
