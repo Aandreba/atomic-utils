@@ -48,6 +48,11 @@ impl Flag {
         }
     }
 
+    #[inline]
+    pub fn has_subscriber(&self) -> bool {
+        return Arc::weak_count(&self.inner) > 0;
+    }
+
     /// Mark this flag reference as completed, consuming it
     #[inline]
     pub fn mark(self) {}
@@ -156,6 +161,11 @@ cfg_if::cfg_if! {
             #[inline]
             pub unsafe fn from_raw (ptr: *const Option<Waker>) -> Self {
                 Self { inner: Arc::from_raw(ptr.cast()) }
+            }
+
+            #[inline]
+            pub fn has_subscriber(&self) -> bool {
+                return Arc::weak_count(&self.inner) > 0
             }
 
             /// Marks this flag as complete, consuming it
