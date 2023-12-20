@@ -64,6 +64,8 @@ impl<T> Receiver<T> {
     }
 }
 
+unsafe impl<T: Send> Send for Sender<T> {}
+unsafe impl<T: Send> Send for Receiver<T> {}
 unsafe impl<T: Send> Sync for Sender<T> {}
 unsafe impl<T: Send> Sync for Receiver<T> {}
 
@@ -143,6 +145,8 @@ cfg_if::cfg_if! {
             }
         }
 
+        unsafe impl<T: Send> Send for AsyncSender<T> {}
+        unsafe impl<T: Send> Send for AsyncReceiver<T> {}
         unsafe impl<T: Send> Sync for AsyncSender<T> {}
         unsafe impl<T: Send> Sync for AsyncReceiver<T> {}
 
