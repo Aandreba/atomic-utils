@@ -9,13 +9,13 @@ struct Inner<T> {
 unsafe impl<T: Send> Send for Inner<T> {}
 unsafe impl<T: Sync> Sync for Inner<T> {}
 
-/// A channel sender that can only send a single value  
+/// A channel sender that can only send a single value
 pub struct Sender<T> {
     inner: Weak<Inner<T>>,
     flag: Flag,
 }
 
-/// A channel receiver that can only receive a single value  
+/// A channel receiver that can only receive a single value
 pub struct Receiver<T> {
     inner: Arc<Inner<T>>,
     sub: Subscribe,
@@ -63,6 +63,9 @@ impl<T> Receiver<T> {
         return Ok(unsafe { &mut *self.inner.v.get() }.take());
     }
 }
+
+unsafe impl<T: Send> Sync for Sender<T> {}
+unsafe impl<T: Send> Sync for Receiver<T> {}
 
 /// Creates a new single-value channel
 pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
@@ -139,6 +142,9 @@ cfg_if::cfg_if! {
                 self.sub.is_terminated()
             }
         }
+
+        unsafe impl<T: Send> Sync for AsyncSender<T> {}
+        unsafe impl<T: Send> Sync for AsyncReceiver<T> {}
 
         /// Creates a new async and single-value channel
         pub fn async_channel<T>() -> (AsyncSender<T>, AsyncReceiver<T>) {
